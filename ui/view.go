@@ -57,6 +57,18 @@ func (m Model) View() string {
 		return m.renderConfirmModal()
 	}
 
+	if m.ConfirmOptimizeModal {
+		return m.renderOptimizeModal()
+	}
+
+	if m.ConfirmGCModal {
+		return m.renderGCModal()
+	}
+
+	if m.ConfirmQuitModal {
+		return m.renderQuitModal()
+	}
+
 	mainWidth := m.Width - 2
 	if mainWidth < 40 {
 		mainWidth = 40
@@ -166,7 +178,9 @@ func (m Model) View() string {
 		Disabled bool
 	}{
 		{"F1 [A]bout", false},
-		{"F2 [N]ew Build", false},
+		{"F2 R[e]name", false},
+		{"F3 [N]ew Build", false},
+		{"F4 [S]torage", false},
 		{"F5 [R]efresh", false},
 		{"F6 [O]ptimize", false},
 		{"F7 [C]lean GC", false},
@@ -207,7 +221,7 @@ func (m Model) View() string {
 
 func (m Model) renderAboutModal() string {
 	msg := fmt.Sprintf(
-		"NIXOS BUILDS MANAGER v0.1\n\nTerminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\nGitHub:\nhttps://github.com/dmikam/nixos-builds-manager\n\nShortcuts:\n[S] - Store Path Analyzer   [E] - Edit Label\n\nPress ESC / Enter / A to close",
+		"NIXOS BUILDS MANAGER v0.1\n\nTerminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\nGitHub:\nhttps://github.com/dmikam/nixos-builds-manager\n\nPress ESC / Enter / A / Q to close",
 	)
 	modalView := styles.ModalStyle.Render(msg)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
@@ -218,7 +232,7 @@ func (m Model) renderAnalyzeModal() string {
 		return ""
 	}
 	msg := fmt.Sprintf(
-		"STORE PATH ANALYZER\n\nGeneration: %d (%s)\nStore Path:\n%s\n\nClosure Disk Usage:\n%s\n\nPress ESC / Enter / S to close",
+		"STORE PATH ANALYZER\n\nGeneration: %d (%s)\nStore Path:\n%s\n\nClosure Disk Usage:\n%s\n\nPress ESC / Enter / S / F4 to close",
 		m.AnalyzeGen.ID,
 		m.AnalyzeGen.Label,
 		m.AnalyzeGen.Target,
@@ -320,6 +334,63 @@ func (m Model) renderConfirmModal() string {
 	msg := fmt.Sprintf(
 		"CONFIRM PURGE GENERATIONS\n\nAre you sure you want to PURGE %d generation(s)?\n\n%s   %s",
 		len(ids),
+		btnYes,
+		btnNo,
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderOptimizeModal() string {
+	btnYes := styles.ButtonNormal.Render(" Yes, Optimize ")
+	btnNo := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.OptimizeModalOption == 0 {
+		btnYes = styles.ButtonActive.Render(" Yes, Optimize ")
+	} else {
+		btnNo = styles.ButtonActive.Render(" Cancel ")
+	}
+
+	msg := fmt.Sprintf(
+		"CONFIRM STORE OPTIMIZATION\n\nOptimize Nix store by hardlinking identical files?\n\n%s   %s",
+		btnYes,
+		btnNo,
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderGCModal() string {
+	btnYes := styles.ButtonNormal.Render(" Yes, Clean GC ")
+	btnNo := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.GCModalOption == 0 {
+		btnYes = styles.ButtonActive.Render(" Yes, Clean GC ")
+	} else {
+		btnNo = styles.ButtonActive.Render(" Cancel ")
+	}
+
+	msg := fmt.Sprintf(
+		"CONFIRM GARBAGE COLLECTION\n\nRun Nix Garbage Collector to remove unreferenced store paths?\n\n%s   %s",
+		btnYes,
+		btnNo,
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderQuitModal() string {
+	btnYes := styles.ButtonNormal.Render(" Yes, Quit ")
+	btnNo := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.QuitModalOption == 0 {
+		btnYes = styles.ButtonActive.Render(" Yes, Quit ")
+	} else {
+		btnNo = styles.ButtonActive.Render(" Cancel ")
+	}
+
+	msg := fmt.Sprintf(
+		"CONFIRM EXIT\n\nAre you sure you want to quit NixOS Builds Manager?\n\n%s   %s",
 		btnYes,
 		btnNo,
 	)

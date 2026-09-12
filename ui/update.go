@@ -29,10 +29,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.AnalyzeModal {
-			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "s" {
+			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "s" || msg.String() == "f4" {
 				m.AnalyzeModal = false
 			}
 			return m, nil
+		}
+		if m.ConfirmOptimizeModal {
+			return m.handleOptimizeModalKeys(msg)
+		}
+		if m.ConfirmGCModal {
+			return m.handleGCModalKeys(msg)
+		}
+		if m.ConfirmQuitModal {
+			return m.handleQuitModalKeys(msg)
 		}
 		if m.RenameModal {
 			return m.handleRenameModalKeys(msg)
@@ -98,6 +107,75 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleOptimizeModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h", "right", "l", "tab":
+		m.OptimizeModalOption = 1 - m.OptimizeModalOption
+	case "y", "Y":
+		return m.executeOptimize()
+	case "n", "N", "esc":
+		m.ConfirmOptimizeModal = false
+	case "enter":
+		if m.OptimizeModalOption == 0 {
+			return m.executeOptimize()
+		}
+		m.ConfirmOptimizeModal = false
+	}
+	return m, nil
+}
+
+func (m Model) executeOptimize() (tea.Model, tea.Cmd) {
+	m.ConfirmOptimizeModal = false
+	m.IsLoading = true
+	m.ShowLog = true
+	m.LogData = "Optimizing Nix store...\n\n"
+	m.Viewport.SetContent(m.LogData)
+	return m, runOptimizeStreamCmd()
+}
+
+func (m Model) handleGCModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h", "right", "l", "tab":
+		m.GCModalOption = 1 - m.GCModalOption
+	case "y", "Y":
+		return m.executeGC()
+	case "n", "N", "esc":
+		m.ConfirmGCModal = false
+	case "enter":
+		if m.GCModalOption == 0 {
+			return m.executeGC()
+		}
+		m.ConfirmGCModal = false
+	}
+	return m, nil
+}
+
+func (m Model) executeGC() (tea.Model, tea.Cmd) {
+	m.ConfirmGCModal = false
+	m.IsLoading = true
+	m.ShowLog = true
+	m.LogData = "Cleaning unreferenced store paths...\n\n"
+	m.Viewport.SetContent(m.LogData)
+	return m, runGarbageCollectStreamCmd()
+}
+
+func (m Model) handleQuitModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h", "right", "l", "tab":
+		m.QuitModalOption = 1 - m.QuitModalOption
+	case "y", "Y":
+		return m, tea.Quit
+	case "n", "N", "esc":
+		m.ConfirmQuitModal = false
+	case "enter":
+		if m.QuitModalOption == 0 {
+			return m, tea.Quit
+		}
+		m.ConfirmQuitModal = false
+	}
+	return m, nil
 }
 
 func (m Model) handleRenameModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -273,53 +351,40 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.AboutModal = true
 		return m, nil
 
-	case "f2", "n":
+	case "f2", "e":
 		m.ActiveButton = 1
 		return m.executeButtonAction()
 
-	case "f5", "r":
+	case "f3", "n":
 		m.ActiveButton = 2
 		return m.executeButtonAction()
 
-	case "f6", "o":
+	case "f4", "s":
 		m.ActiveButton = 3
 		return m.executeButtonAction()
 
-	case "f7", "c":
+	case "f5", "r":
 		m.ActiveButton = 4
+		return m.executeButtonAction()
+
+	case "f6", "o":
+		m.ActiveButton = 5
+		return m.executeButtonAction()
+
+	case "f7", "c":
+		m.ActiveButton = 6
 		return m.executeButtonAction()
 
 	case "f8", "p":
 		if len(m.getSelectedGenerations()) > 0 {
-			m.ActiveButton = 5
+			m.ActiveButton = 7
 			return m.executeButtonAction()
 		}
 
 	case "f10", "q", "ctrl+c":
-		return m, tea.Quit
-
-	case "e":
-		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
-			selected := &m.Generations[m.Cursor]
-			m.RenameGen = selected
-			m.RenameInput.SetValue(selected.Label)
-			m.RenameInput.Focus()
-			m.RenameModal = true
-			return m, textinput.Blink
-		}
-
-	case "s":
-		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
-			selected := &m.Generations[m.Cursor]
-			size, err := nix.AnalyzeStorePathSize(selected.Target)
-			if err != nil {
-				size = "Failed to evaluate"
-			}
-			m.AnalyzeGen = selected
-			m.AnalyzeResult = size
-			m.AnalyzeModal = true
-			return m, nil
-		}
+		m.ConfirmQuitModal = true
+		m.QuitModalOption = 0
+		return m, nil
 
 	case "tab":
 		if m.Focus == FocusList {
@@ -344,7 +409,7 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "right":
-		if m.Focus == FocusFooter && m.ActiveButton < 6 {
+		if m.Focus == FocusFooter && m.ActiveButton < 8 {
 			m.ActiveButton++
 		}
 
@@ -376,7 +441,16 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	switch m.ActiveButton {
 	case 0: // About
 		m.AboutModal = true
-	case 1: // New Build
+	case 1: // Rename
+		if len(m.Generations) > m.Cursor {
+			selected := &m.Generations[m.Cursor]
+			m.RenameGen = selected
+			m.RenameInput.SetValue(selected.Label)
+			m.RenameInput.Focus()
+			m.RenameModal = true
+			return m, textinput.Blink
+		}
+	case 2: // New Build
 		m.BuildModal = true
 		m.BuildModalOption = 0
 		m.IsProfile = false
@@ -384,29 +458,36 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 		m.LabelInput.Reset()
 		m.LabelInput.Focus()
 		return m, textinput.Blink
-	case 2: // Refresh
+	case 3: // Analyze Storage
+		if len(m.Generations) > m.Cursor {
+			selected := &m.Generations[m.Cursor]
+			size, err := nix.AnalyzeStorePathSize(selected.Target)
+			if err != nil {
+				size = "Failed to evaluate"
+			}
+			m.AnalyzeGen = selected
+			m.AnalyzeResult = size
+			m.AnalyzeModal = true
+			return m, nil
+		}
+	case 4: // Refresh
 		m.IsLoading = true
 		m.LoadingMsg = "Refreshing generations..."
 		return m, fetchGenerationsCmd()
-	case 3: // Optimize Store
-		m.IsLoading = true
-		m.ShowLog = true
-		m.LogData = "Optimizing Nix store...\n\n"
-		m.Viewport.SetContent(m.LogData)
-		return m, runOptimizeStreamCmd()
-	case 4: // Clean GC
-		m.IsLoading = true
-		m.ShowLog = true
-		m.LogData = "Cleaning unreferenced store paths...\n\n"
-		m.Viewport.SetContent(m.LogData)
-		return m, runGarbageCollectStreamCmd()
-	case 5: // Purge Selected
+	case 5: // Optimize Store
+		m.ConfirmOptimizeModal = true
+		m.OptimizeModalOption = 0
+	case 6: // Clean GC
+		m.ConfirmGCModal = true
+		m.GCModalOption = 0
+	case 7: // Purge Selected
 		if len(m.getSelectedGenerations()) > 0 {
 			m.ConfirmModal = true
 			m.PurgeModalOption = 0
 		}
-	case 6: // Quit
-		return m, tea.Quit
+	case 8: // Quit
+		m.ConfirmQuitModal = true
+		m.QuitModalOption = 0
 	}
 	return m, nil
 }

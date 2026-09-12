@@ -36,17 +36,27 @@ type Model struct {
 	ConfirmModal     bool
 	PurgeModalOption int
 
+	// Confirmation Dialog Modals
+	ConfirmOptimizeModal bool
+	OptimizeModalOption  int
+
+	ConfirmGCModal bool
+	GCModalOption  int
+
+	ConfirmQuitModal bool
+	QuitModalOption  int
+
 	SwitchModal       bool
 	SwitchTargetGen   *nix.Generation
 	SwitchModalOption int
 
-	RenameModal    bool
-	RenameGen      *nix.Generation
-	RenameInput    textinput.Model
+	RenameModal bool
+	RenameGen   *nix.Generation
+	RenameInput textinput.Model
 
-	AnalyzeModal   bool
-	AnalyzeGen     *nix.Generation
-	AnalyzeResult  string
+	AnalyzeModal  bool
+	AnalyzeGen    *nix.Generation
+	AnalyzeResult string
 
 	IsLoading  bool
 	LoadingMsg string
@@ -81,28 +91,34 @@ func InitialModel() Model {
 	ri.Width = 40
 
 	return Model{
-		Generations:       []nix.Generation{},
-		Cursor:            0,
-		Focus:             FocusList,
-		ActiveButton:      0,
-		FreeSpace:         nix.GetNixStoreFreeSpace(),
-		AboutModal:        false,
-		ConfirmModal:      false,
-		BuildModal:        false,
-		SwitchModal:       false,
-		RenameModal:       false,
-		AnalyzeModal:      false,
-		SwitchModalOption: 0,
-		LabelInput:        ti,
-		RenameInput:       ri,
-		IsProfile:         false,
-		SwitchBuild:       true,
-		BuildModalOption:  0,
-		PurgeModalOption:  0,
-		IsLoading:         true,
-		LoadingMsg:        "Loading NixOS generations...",
-		Spinner:           s,
-		Viewport:          vp,
+		Generations:          []nix.Generation{},
+		Cursor:               0,
+		Focus:                FocusList,
+		ActiveButton:         0,
+		FreeSpace:            nix.GetNixStoreFreeSpace(),
+		AboutModal:           false,
+		ConfirmModal:         false,
+		ConfirmOptimizeModal: false,
+		ConfirmGCModal:       false,
+		ConfirmQuitModal:     false,
+		BuildModal:           false,
+		SwitchModal:          false,
+		RenameModal:          false,
+		AnalyzeModal:         false,
+		SwitchModalOption:    0,
+		LabelInput:           ti,
+		RenameInput:          ri,
+		IsProfile:            false,
+		SwitchBuild:          true,
+		BuildModalOption:     0,
+		PurgeModalOption:     0,
+		OptimizeModalOption:  0,
+		GCModalOption:        0,
+		QuitModalOption:      0,
+		IsLoading:            true,
+		LoadingMsg:           "Loading NixOS generations...",
+		Spinner:              s,
+		Viewport:             vp,
 	}
 }
 

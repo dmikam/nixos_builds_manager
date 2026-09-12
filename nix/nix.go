@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 type Generation struct {
@@ -64,6 +66,7 @@ func ListGenerations() ([]Generation, error) {
 	reSystem := regexp.MustCompile(`system-(\d+)-link$`)
 	reCustom := regexp.MustCompile(`^(.+)-(\d+)-link$`)
 
+	seenIDs := make(map[int]bool)
 	var generations []Generation
 
 	for _, file := range files {
@@ -72,9 +75,9 @@ func ListGenerations() ([]Generation, error) {
 			target = "Unknown"
 		}
 
-		info, err := os.Lstat(file)
+		// Use Lstat on the symlink itself (store path targets are reset to 1970 by Nix)
 		var ts time.Time
-		if err == nil {
+		if info, err := os.Lstat(file); err == nil {
 			ts = info.ModTime()
 		}
 
@@ -96,6 +99,13 @@ func ListGenerations() ([]Generation, error) {
 			}
 		}
 
+		if id > 0 && seenIDs[id] {
+			continue
+		}
+		if id > 0 {
+			seenIDs[id] = true
+		}
+
 		kernelVer := extractKernelVersion(target)
 
 		generations = append(generations, Generation{
@@ -110,8 +120,9 @@ func ListGenerations() ([]Generation, error) {
 		})
 	}
 
+	// Keep list ordered by Generation ID descending
 	sort.Slice(generations, func(i, j int) bool {
-		return generations[i].Timestamp.After(generations[j].Timestamp)
+		return generations[i].ID > generations[j].ID
 	})
 
 	currentFound := false
@@ -139,26 +150,73 @@ func extractKernelVersion(storePath string) string {
 	if err != nil {
 		return "Unknown"
 	}
-	base := filepath.Base(target)
+
+	parentDir := filepath.Dir(target)
+	baseParent := filepath.Base(parentDir)
+
 	re := regexp.MustCompile(`linux-(.+)$`)
-	matches := re.FindStringSubmatch(base)
+	matches := re.FindStringSubmatch(baseParent)
 	if len(matches) > 1 {
 		return matches[1]
 	}
-	return base
+
+	modulesLink := filepath.Join(storePath, "kernel-modules")
+	if modTarget, err := os.Readlink(modulesLink); err == nil {
+		modBase := filepath.Base(modTarget)
+		modMatches := re.FindStringSubmatch(modBase)
+		if len(modMatches) > 1 {
+			return modMatches[1]
+		}
+	}
+
+	return "Linux"
 }
 
 func AnalyzeStorePathSize(storePath string) (string, error) {
-	cmd := exec.Command("nix-path-info", "-Sh", storePath)
+	cmd := exec.Command("nix", "path-info", "-S", storePath)
 	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to analyze store path: %w", err)
+	if err == nil {
+		fields := strings.Fields(string(out))
+		if len(fields) >= 2 {
+			bytesVal, parseErr := strconv.ParseInt(fields[1], 10, 64)
+			if parseErr == nil {
+				return formatBytes(bytesVal), nil
+			}
+		}
 	}
-	fields := strings.Fields(string(out))
-	if len(fields) >= 2 {
-		return fields[1], nil
+
+	cmdFallback := exec.Command("du", "-sh", storePath)
+	outFallback, errFallback := cmdFallback.Output()
+	if errFallback == nil {
+		fields := strings.Fields(string(outFallback))
+		if len(fields) >= 1 {
+			return fields[0], nil
+		}
 	}
-	return strings.TrimSpace(string(out)), nil
+
+	return "", fmt.Errorf("failed to analyze store path size")
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// Helper function to update timestamp on a symlink directly
+func setSymlinkTimestamp(path string, ts time.Time) error {
+	times := []unix.Timespec{
+		unix.NsecToTimespec(ts.UnixNano()), // Access time
+		unix.NsecToTimespec(ts.UnixNano()), // Modification time
+	}
+	return unix.UtimesNanoAt(unix.AT_FDCWD, path, times, unix.AT_SYMLINK_NOFOLLOW)
 }
 
 func RenameCustomProfile(gen Generation, newLabel string) error {
@@ -167,17 +225,35 @@ func RenameCustomProfile(gen Generation, newLabel string) error {
 		return fmt.Errorf("invalid or empty label")
 	}
 
-	if !strings.HasPrefix(gen.Path, "/nix/var/nix/profiles/system-profiles/") {
-		return fmt.Errorf("only custom profiles can be renamed directly")
+	origTimestamp := gen.Timestamp
+
+	// 1. Rename existing custom profile symlink while maintaining original timestamp
+	if strings.HasPrefix(gen.Path, "/nix/var/nix/profiles/system-profiles/") {
+		dir := filepath.Dir(gen.Path)
+		newPath := filepath.Join(dir, fmt.Sprintf("%s-%d-link", cleanLabel, gen.ID))
+		if err := os.Rename(gen.Path, newPath); err != nil {
+			return err
+		}
+		_ = setSymlinkTimestamp(newPath, origTimestamp)
+		return nil
 	}
 
-	dir := filepath.Dir(gen.Path)
-	newLinkPath := filepath.Join(dir, fmt.Sprintf("%s-%d-link", cleanLabel, gen.ID))
+	// 2. Create custom profile symlink, copy original timestamp, remove standard symlink
+	profileDir := "/nix/var/nix/profiles/system-profiles"
+	_ = os.MkdirAll(profileDir, 0755)
 
-	err := os.Rename(gen.Path, newLinkPath)
-	if err != nil {
-		return fmt.Errorf("failed to rename profile link: %w", err)
+	newProfileLink := filepath.Join(profileDir, fmt.Sprintf("%s-%d-link", cleanLabel, gen.ID))
+	_ = os.Remove(newProfileLink)
+
+	if err := os.Symlink(gen.Target, newProfileLink); err != nil {
+		return fmt.Errorf("failed to create symlink: %w", err)
 	}
+
+	// Restore original symlink timestamp
+	_ = setSymlinkTimestamp(newProfileLink, origTimestamp)
+
+	// Remove default symlink to prevent legacy accumulation
+	_ = os.Remove(gen.Path)
 
 	return nil
 }
