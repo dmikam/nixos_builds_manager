@@ -1,10 +1,10 @@
-# NixOS Generation Manager & Store Optimizer TUI
+# nixos_builds_manager
 
-A terminal application written in Go using `bubbletea` and `lipgloss` to safely manage NixOS generations and optimize the Nix store.
+A full-screen Midnight Commander (MC) / HTOP styled Terminal User Interface (TUI) application in Go to manage NixOS generations and optimize the Nix store.
 
 ## Build
 
-You can compile the static binary using Docker Compose without needing Go installed locally:
+Compile the static binary using Docker Compose:
 
 ```bash
 docker compose up build

@@ -15,27 +15,18 @@ const (
 	FocusFooter
 )
 
-type CommandType int
-
-const (
-	CmdNone CommandType = iota
-	CmdPurge
-	CmdOptimize
-)
-
 type Model struct {
-	Generations []nix.Generation
-	Cursor      int
-	Focus       FocusArea
+	Width        int
+	Height       int
+	Generations  []nix.Generation
+	Cursor       int
+	Focus        FocusArea
 	ActiveButton int
 
-	// Dialog & Modal state
 	ConfirmModal bool
 	IsLoading    bool
 	LoadingMsg   string
-	ActiveCmd    CommandType
 
-	// Log Output
 	Viewport viewport.Model
 	ShowLog  bool
 	LogData  string
@@ -53,7 +44,7 @@ type OperationFinishedMsg struct {
 func InitialModel() Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	vp := viewport.New(80, 10)
+	vp := viewport.New(80, 20)
 
 	return Model{
 		Generations:  []nix.Generation{},
@@ -62,7 +53,7 @@ func InitialModel() Model {
 		ActiveButton: 0,
 		ConfirmModal: false,
 		IsLoading:    true,
-		LoadingMsg:   "Loading generations...",
+		LoadingMsg:   "Loading NixOS generations...",
 		Spinner:      s,
 		Viewport:     vp,
 	}

@@ -10,30 +10,40 @@ import (
 )
 
 func (m Model) View() string {
+	if m.Width == 0 || m.Height == 0 {
+		return "Initializing..."
+	}
+
 	if m.IsLoading {
-		return fmt.Sprintf("\n  %s %s\n", m.Spinner.View(), m.LoadingMsg)
+		msg := fmt.Sprintf("%s %s", m.Spinner.View(), m.LoadingMsg)
+		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, msg)
 	}
 
 	if m.ShowLog {
-		return fmt.Sprintf(
+		logView := fmt.Sprintf(
 			"%s\n\n%s\n\n%s",
-			styles.HeaderStyle.Render("Operation Log / Output"),
+			styles.HeaderTitle.Render(" --- OPERATION LOG / OUTPUT --- "),
 			m.Viewport.View(),
-			styles.SubHeaderStyle.Render("Press [ESC/Enter/q] to return"),
+			styles.HeaderInfo.Render("Press [ESC / Enter / q] to return"),
 		)
+		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, logView)
 	}
 
 	if m.ConfirmModal {
 		return m.renderModal()
 	}
 
-	var doc strings.Builder
+	mainWidth := m.Width - 2
+	if mainWidth < 40 {
+		mainWidth = 40
+	}
 
-	// Header
-	doc.WriteString(styles.HeaderStyle.Render("NixOS Generation Manager & Store Optimizer"))
-	doc.WriteString("\n")
+	panelHeight := m.Height - 3
+	if panelHeight < 8 {
+		panelHeight = 8
+	}
 
-	// Current info
+	// 1. Header Bar
 	currentGen := "Unknown"
 	for _, g := range m.Generations {
 		if g.IsCurrent {
@@ -41,20 +51,39 @@ func (m Model) View() string {
 			break
 		}
 	}
-	doc.WriteString(fmt.Sprintf(" Booted System: %s\n\n", styles.SubHeaderStyle.Render(currentGen)))
+	headerText := fmt.Sprintf(" NixOS Builds Manager | Booted: %s ", currentGen)
+	headerTextPadded := fmt.Sprintf("%-*s", mainWidth, headerText)
+	headerView := styles.HeaderTitle.Render(headerTextPadded)
 
-	// Main Table Header
-	doc.WriteString(fmt.Sprintf(" %-4s %-6s %-20s %-12s %s\n", "Mark", "ID", "Date", "Status", "Store Target"))
-	doc.WriteString(" " + strings.Repeat("-", 75) + "\n")
+	// 2. MC Table Panel
+	var content strings.Builder
+	tblHeader := fmt.Sprintf(" %-4s %-6s %-18s %-10s %s", "Mark", "ID", "Date & Time", "Status", "Nix Store Path Target")
+	tblHeaderPadded := fmt.Sprintf("%-*s", mainWidth-4, tblHeader)
+	content.WriteString(styles.TableHeader.Render(tblHeaderPadded) + "\n")
 
-	// Table Rows
-	for i, g := range m.Generations {
+	visibleRows := panelHeight - 4
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+
+	startIdx := 0
+	if m.Cursor >= visibleRows {
+		startIdx = m.Cursor - visibleRows + 1
+	}
+	endIdx := startIdx + visibleRows
+	if endIdx > len(m.Generations) {
+		endIdx = len(m.Generations)
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		g := m.Generations[i]
+
 		mark := "[ ]"
 		if g.Marked {
 			mark = "[X]"
 		}
 
-		status := ""
+		status := " "
 		if g.IsCurrent {
 			status = styles.CurrentBadge.Render("CURRENT")
 		} else if g.Marked {
@@ -63,48 +92,73 @@ func (m Model) View() string {
 
 		dateStr := g.Timestamp.Format("2006-01-02 15:04")
 		targetTrunc := g.Target
-		if len(targetTrunc) > 30 {
-			targetTrunc = "..." + targetTrunc[len(targetTrunc)-27:]
+		maxTargetWidth := mainWidth - 45
+		if maxTargetWidth > 10 && len(targetTrunc) > maxTargetWidth {
+			targetTrunc = "..." + targetTrunc[len(targetTrunc)-maxTargetWidth+3:]
 		}
 
-		rowStr := fmt.Sprintf("%-4s %-6d %-20s %-12s %s", mark, g.ID, dateStr, status, targetTrunc)
+		rowStr := fmt.Sprintf(" %-4s %-6d %-18s %-10s %s", mark, g.ID, dateStr, status, targetTrunc)
+		rowPadded := fmt.Sprintf("%-*s", mainWidth-4, rowStr)
 
 		if i == m.Cursor && m.Focus == FocusList {
-			doc.WriteString(styles.SelectedRow.Render(rowStr) + "\n")
+			content.WriteString(styles.SelectedRow.Render(rowPadded) + "\n")
 		} else {
-			doc.WriteString(styles.NormalRow.Render(rowStr) + "\n")
+			content.WriteString(styles.NormalRow.Render(rowPadded) + "\n")
 		}
 	}
 
-	doc.WriteString("\n")
+	// Pad remaining space
+	for i := endIdx - startIdx; i < visibleRows; i++ {
+		emptyPadded := fmt.Sprintf("%-*s", mainWidth-4, "")
+		content.WriteString(styles.NormalRow.Render(emptyPadded) + "\n")
+	}
 
-	// Footer Action Buttons
-	buttons := []string{"Purge Selected", "Optimize Store", "Refresh", "Quit"}
+	panelView := styles.PanelStyle.
+		Width(mainWidth).
+		Height(panelHeight).
+		Render(content.String())
+
+	// 3. Footer Bar
+	buttons := []struct {
+		Key   string
+		Label string
+	}{
+		{"F1/1", "Purge Selected"},
+		{"F2/2", "Optimize Store"},
+		{"F3/3", "Refresh"},
+		{"F4/4", "Quit"},
+	}
+
 	var btnViews []string
-
 	for i, btn := range buttons {
+		btnStr := fmt.Sprintf("%s:%s", btn.Key, btn.Label)
 		if m.Focus == FocusFooter && m.ActiveButton == i {
-			btnViews = append(btnViews, styles.ActiveButtonStyle.Render(btn))
+			btnViews = append(btnViews, styles.ButtonActive.Render(btnStr))
 		} else {
-			btnViews = append(btnViews, styles.ButtonStyle.Render(btn))
+			btnViews = append(btnViews, styles.ButtonNormal.Render(btnStr))
 		}
 	}
 
-	doc.WriteString(lipgloss.JoinHorizontal(lipgloss.Left, btnViews...))
-	doc.WriteString("\n\n")
+	footerContent := strings.Join(btnViews, " ")
+	footerPadded := fmt.Sprintf("%-*s", mainWidth, footerContent)
+	footerView := styles.FooterBarStyle.Render(footerPadded)
 
-	// Keybind hints
-	doc.WriteString(styles.SubHeaderStyle.Render("Controls: ") + "[Tab] Focus toggle | [Space] Mark/Unmark | [Arrows] Navigate | [Enter] Select Action")
+	fullApp := lipgloss.JoinVertical(
+		lipgloss.Left,
+		headerView,
+		panelView,
+		footerView,
+	)
 
-	return doc.String()
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, fullApp)
 }
 
 func (m Model) renderModal() string {
 	ids := m.getSelectedIDs()
-	msg := fmt.Sprintf("Are you sure you want to PURGE %d generations?\nIDs: %v\n\n[Y] Yes, proceed  /  [N] Cancel", len(ids), ids)
-	return lipgloss.Place(
-		80, 15,
-		lipgloss.Center, lipgloss.Center,
-		styles.ModalStyle.Render(msg),
+	msg := fmt.Sprintf(
+		"CONFIRM PURGE GENERATIONS\n\nAre you sure you want to PURGE %d generations?\nIDs: %v\n\n[Y] Yes, proceed  /  [N] Cancel",
+		len(ids), ids,
 	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
 }

@@ -22,7 +22,6 @@ type Generation struct {
 	Marked    bool
 }
 
-// GetCurrentBootedPath resolves the system path currently booted.
 func GetCurrentBootedPath() (string, error) {
 	target, err := os.Readlink("/run/current-system")
 	if err != nil {
@@ -31,7 +30,6 @@ func GetCurrentBootedPath() (string, error) {
 	return target, nil
 }
 
-// ListGenerations lists all NixOS system profiles.
 func ListGenerations() ([]Generation, error) {
 	currentPath, _ := GetCurrentBootedPath()
 
@@ -65,9 +63,7 @@ func ListGenerations() ([]Generation, error) {
 			ts = info.ModTime()
 		}
 
-		// Read configuration name/label if available
 		label := extractSystemLabel(target)
-
 		isCurrent := target == currentPath
 
 		generations = append(generations, Generation{
@@ -96,7 +92,6 @@ func extractSystemLabel(storePath string) string {
 	return "NixOS System"
 }
 
-// PurgeGenerations deletes specified generation IDs and garbage-collects.
 func PurgeGenerations(ids []int) (string, error) {
 	if len(ids) == 0 {
 		return "No generations selected to purge.", nil
@@ -126,7 +121,6 @@ func PurgeGenerations(ids []int) (string, error) {
 	return out1 + "\n" + out2 + "\n" + out3, nil
 }
 
-// OptimizeStore runs nix-store --optimise.
 func OptimizeStore() (string, error) {
 	return runCmd("nix-store", "--optimise")
 }

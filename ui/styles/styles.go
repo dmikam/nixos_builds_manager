@@ -3,53 +3,78 @@ package styles
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	PrimaryColor   = lipgloss.Color("#7D56F4")
-	SecondaryColor = lipgloss.Color("#04B575")
-	WarningColor   = lipgloss.Color("#FF5F56")
-	MutedColor     = lipgloss.Color("#626262")
-	BgSelected     = lipgloss.Color("#353535")
+	// Midnight Commander / HTOP classic palette
+	CyanBg      = lipgloss.Color("#008080")
+	BlueBg      = lipgloss.Color("#0000AA")
+	HeaderBg    = lipgloss.Color("#005F87")
+	FooterBg    = lipgloss.Color("#005F87")
+	PanelBorder = lipgloss.Color("#00AAAA")
 
-	HeaderStyle = lipgloss.NewStyle().
+	FgWhite  = lipgloss.Color("#FFFFFF")
+	FgYellow = lipgloss.Color("#FFFF55")
+	FgGreen  = lipgloss.Color("#55FF55")
+	FgRed    = lipgloss.Color("#FF5555")
+	FgBlack  = lipgloss.Color("#000000")
+
+	// Header Styles
+	HeaderTitle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(PrimaryColor).
-			Padding(0, 1).
-			MarginBottom(1)
+			Foreground(FgYellow).
+			Background(HeaderBg)
 
-	SubHeaderStyle = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true)
+	HeaderInfo = lipgloss.NewStyle().
+			Foreground(FgWhite).
+			Background(HeaderBg)
 
-	CurrentBadge = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00FF00")).
-			Bold(true)
+	// Double-border panel frame
+	PanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(PanelBorder).
+			Background(BlueBg)
 
-	MarkedBadge = lipgloss.NewStyle().
-			Foreground(WarningColor).
-			Bold(true)
+	TableHeader = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(FgYellow).
+			Background(CyanBg)
 
+	// Table Rows
 	NormalRow = lipgloss.NewStyle().
-			Padding(0, 1)
+			Foreground(FgWhite).
+			Background(BlueBg)
 
 	SelectedRow = lipgloss.NewStyle().
-			Padding(0, 1).
-			Background(BgSelected)
+			Bold(true).
+			Foreground(FgBlack).
+			Background(CyanBg)
 
-	ButtonStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(MutedColor).
-			Padding(0, 2).
-			MarginRight(1)
+	CurrentBadge = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(FgGreen)
 
-	ActiveButtonStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(PrimaryColor).
-				Bold(true).
-				Padding(0, 2).
-				MarginRight(1)
+	MarkedBadge = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(FgRed)
 
+	// Bottom Action Bar
+	ButtonNormal = lipgloss.NewStyle().
+			Foreground(FgBlack).
+			Background(CyanBg).
+			Padding(0, 1)
+
+	ButtonActive = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(FgBlack).
+			Background(FgYellow).
+			Padding(0, 1)
+
+	FooterBarStyle = lipgloss.NewStyle().
+			Background(FooterBg).
+			Foreground(FgWhite)
+
+	// Modal Box
 	ModalStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(WarningColor).
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(FgRed).
+			Background(BlueBg).
 			Padding(1, 2)
 )

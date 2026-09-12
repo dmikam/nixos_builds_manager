@@ -14,6 +14,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.Width = msg.Width
+		m.Height = msg.Height
+		m.Viewport.Width = msg.Width - 6
+		m.Viewport.Height = msg.Height - 8
+
 	case tea.KeyMsg:
 		if m.ConfirmModal {
 			return m.handleModalKeys(msg)
@@ -42,7 +48,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case GenerationsLoadedMsg:
 		m.Generations = msg
 		m.IsLoading = false
-		m.Cursor = 0
+		if m.Cursor >= len(m.Generations) && len(m.Generations) > 0 {
+			m.Cursor = len(m.Generations) - 1
+		}
 
 	case OperationFinishedMsg:
 		m.IsLoading = false
@@ -126,20 +134,20 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	switch m.ActiveButton {
-	case 0: // Purge Selected
+	case 0:
 		marked := m.getSelectedIDs()
 		if len(marked) > 0 {
 			m.ConfirmModal = true
 		}
-	case 1: // Optimize Store
+	case 1:
 		m.IsLoading = true
 		m.LoadingMsg = "Optimizing Nix Store..."
 		return m, runOptimizeCmd()
-	case 2: // Refresh
+	case 2:
 		m.IsLoading = true
 		m.LoadingMsg = "Refreshing generations..."
 		return m, fetchGenerationsCmd()
-	case 3: // Quit
+	case 3:
 		return m, tea.Quit
 	}
 	return m, nil
