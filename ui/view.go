@@ -37,7 +37,6 @@ func (m Model) View() string {
 		return m.renderConfirmModal()
 	}
 
-	// Calculate panel sizes
 	mainWidth := m.Width - 2
 	if mainWidth < 40 {
 		mainWidth = 40
@@ -50,7 +49,6 @@ func (m Model) View() string {
 		panelHeight = 10
 	}
 
-	// 1. Top Header Bar
 	currentGen := "Unknown"
 	for _, g := range m.Generations {
 		if g.IsCurrent {
@@ -62,10 +60,8 @@ func (m Model) View() string {
 	headerTextPadded := fmt.Sprintf("%-*s", mainWidth, headerText)
 	headerView := styles.HeaderTitle.Render(headerTextPadded)
 
-	// 2. Main Content (MC Panel Style)
 	var content strings.Builder
 
-	// Table Header inside Panel
 	colMark := "Mark"
 	colID := "ID"
 	colLabel := "Build Label"
@@ -77,13 +73,11 @@ func (m Model) View() string {
 	tblHeaderPadded := fmt.Sprintf("%-*s", mainWidth-4, tblHeader)
 	content.WriteString(styles.TableHeader.Render(tblHeaderPadded) + "\n")
 
-	// Max visible rows based on panel height
 	visibleRows := panelHeight - 4
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
 
-	// Calculate pagination scroll window
 	startIdx := 0
 	if m.Cursor >= visibleRows {
 		startIdx = m.Cursor - visibleRows + 1
@@ -130,7 +124,6 @@ func (m Model) View() string {
 		}
 	}
 
-	// Fill remaining empty space in panel to maintain height
 	renderedRows := endIdx - startIdx
 	for i := renderedRows; i < visibleRows; i++ {
 		emptyPadded := fmt.Sprintf("%-*s", mainWidth-4, "")
@@ -142,25 +135,25 @@ func (m Model) View() string {
 		Height(panelHeight).
 		Render(content.String())
 
-	// 3. Bottom Footer Bar / Function Keys
 	buttons := []struct {
-		Key   string
-		Label string
+		Label    string
+		Disabled bool
 	}{
-		{"F1/1", "New Build"},
-		{"F2/2", "Purge Selected"},
-		{"F3/3", "Optimize Store"},
-		{"F4/4", "Refresh"},
-		{"F5/5", "Quit"},
+		{"New Build", false},
+		{"Purge Selected", len(m.getSelectedGenerations()) == 0},
+		{"Optimize Store", false},
+		{"Refresh", false},
+		{"Quit", false},
 	}
 
 	var btnViews []string
 	for i, btn := range buttons {
-		btnStr := fmt.Sprintf("%s:%s", btn.Key, btn.Label)
-		if m.Focus == FocusFooter && m.ActiveButton == i {
-			btnViews = append(btnViews, styles.ButtonActive.Render(btnStr))
+		if btn.Disabled {
+			btnViews = append(btnViews, styles.ButtonDisabled.Render(btn.Label))
+		} else if m.Focus == FocusFooter && m.ActiveButton == i {
+			btnViews = append(btnViews, styles.ButtonActive.Render(btn.Label))
 		} else {
-			btnViews = append(btnViews, styles.ButtonNormal.Render(btnStr))
+			btnViews = append(btnViews, styles.ButtonNormal.Render(btn.Label))
 		}
 	}
 
@@ -168,7 +161,6 @@ func (m Model) View() string {
 	footerPadded := fmt.Sprintf("%-*s", mainWidth, footerContent)
 	footerView := styles.FooterBarStyle.Render(footerPadded)
 
-	// Combine components & center whole layout
 	fullApp := lipgloss.JoinVertical(
 		lipgloss.Left,
 		headerView,
@@ -180,19 +172,52 @@ func (m Model) View() string {
 }
 
 func (m Model) renderBuildModal() string {
+	chk := "[ ] As a new Profile"
+	if m.IsProfile {
+		chk = "[X] As a new Profile"
+	}
+
+	if m.BuildModalOption == 1 {
+		chk = styles.ButtonActive.Render(chk)
+	}
+
+	btnStart := styles.ButtonNormal.Render(" Start Build ")
+	btnCancel := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.BuildModalOption == 2 {
+		btnStart = styles.ButtonActive.Render(" Start Build ")
+	} else if m.BuildModalOption == 3 {
+		btnCancel = styles.ButtonActive.Render(" Cancel ")
+	}
+
 	msg := fmt.Sprintf(
-		"CREATE NEW NIXOS BUILD\n\nEnter optional profile label for the build:\n\n%s\n\n[Enter] Start Build  /  [ESC] Cancel",
+		"CREATE NEW NIXOS BUILD\n\nLabel:\n%s\n\n%s\n\n%s   %s",
 		m.LabelInput.View(),
+		chk,
+		btnStart,
+		btnCancel,
 	)
 	modalView := styles.ModalStyle.Render(msg)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
 }
 
 func (m Model) renderConfirmModal() string {
-	ids := m.getSelectedIDs()
+	ids := m.getSelectedGenerations()
+
+	btnYes := styles.ButtonNormal.Render(" Yes, Purge ")
+	btnNo := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.PurgeModalOption == 0 {
+		btnYes = styles.ButtonActive.Render(" Yes, Purge ")
+	} else {
+		btnNo = styles.ButtonActive.Render(" Cancel ")
+	}
+
 	msg := fmt.Sprintf(
-		"CONFIRM PURGE GENERATIONS\n\nAre you sure you want to PURGE %d generations?\nIDs: %v\n\n[Y] Yes, proceed  /  [N] Cancel",
-		len(ids), ids,
+		"CONFIRM PURGE GENERATIONS\n\nAre you sure you want to PURGE %d generation(s)?\n\n%s   %s",
+		len(ids),
+		btnYes,
+		btnNo,
 	)
 	modalView := styles.ModalStyle.Render(msg)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)

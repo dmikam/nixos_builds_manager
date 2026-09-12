@@ -33,13 +33,11 @@ func GetCurrentBootedPath() (string, error) {
 func ListGenerations() ([]Generation, error) {
 	currentPath, _ := GetCurrentBootedPath()
 
-	// 1. Default system profiles
 	files, err := filepath.Glob("/nix/var/nix/profiles/system-*-link")
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan system profiles: %w", err)
 	}
 
-	// 2. Named profiles
 	profileFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*-link")
 	files = append(files, profileFiles...)
 
@@ -106,12 +104,22 @@ func extractSystemLabel(storePath string) string {
 	return "NixOS System"
 }
 
-func RebuildSystem(label string) (string, error) {
-	args := []string{"switch"}
+func RebuildSystem(label string, isProfile bool) (string, error) {
+	var args []string
+	var env []string
+
 	if strings.TrimSpace(label) != "" {
-		args = append(args, "-p", label)
+		if isProfile {
+			args = append(args, "switch", "-p", label)
+		} else {
+			args = append(args, "switch")
+			env = append(os.Environ(), fmt.Sprintf("NIXOS_LABEL=%s", label))
+		}
+	} else {
+		args = append(args, "switch")
 	}
-	return runCmd("nixos-rebuild", args...)
+
+	return runCmdWithEnv(env, "nixos-rebuild", args...)
 }
 
 func PurgeGenerations(gens []Generation) (string, error) {
@@ -123,13 +131,11 @@ func PurgeGenerations(gens []Generation) (string, error) {
 
 	for _, g := range gens {
 		if strings.HasPrefix(g.Path, "/nix/var/nix/profiles/system-profiles/") {
-			// Remove custom profile symlink and its parent link if exists
 			_ = os.Remove(g.Path)
 			parentSymlink := strings.TrimSuffix(g.Path, fmt.Sprintf("-%d-link", g.ID))
 			_ = os.Remove(parentSymlink)
 			outputs = append(outputs, fmt.Sprintf("Removed custom profile: %s", g.Label))
 		} else {
-			// Remove standard system generation
 			out, err := runCmd("nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
 			if err != nil {
 				return strings.Join(outputs, "\n") + "\n" + out, err
@@ -150,7 +156,14 @@ func OptimizeStore() (string, error) {
 }
 
 func runCmd(name string, args ...string) (string, error) {
+	return runCmdWithEnv(nil, name, args...)
+}
+
+func runCmdWithEnv(env []string, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
+	if len(env) > 0 {
+		cmd.Env = env
+	}
 	out, err := cmd.CombinedOutput()
 	outputStr := string(out)
 	if err != nil {

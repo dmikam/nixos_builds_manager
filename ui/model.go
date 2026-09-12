@@ -16,15 +16,6 @@ const (
 	FocusFooter
 )
 
-type CommandType int
-
-const (
-	CmdNone CommandType = iota
-	CmdPurge
-	CmdOptimize
-	CmdBuild
-)
-
 type Model struct {
 	Width        int
 	Height       int
@@ -33,15 +24,19 @@ type Model struct {
 	Focus        FocusArea
 	ActiveButton int
 
-	// Dialog & Modal state
-	ConfirmModal bool
-	BuildModal   bool
-	LabelInput   textinput.Model
+	// Build Modal state
+	BuildModal       bool
+	LabelInput       textinput.Model
+	IsProfile        bool
+	BuildModalOption int // 0: input, 1: checkbox, 2: Start, 3: Cancel
+
+	// Purge Modal state
+	ConfirmModal     bool
+	PurgeModalOption int // 0: Confirm, 1: Cancel
 
 	IsLoading  bool
 	LoadingMsg string
 
-	// Log Output
 	Viewport viewport.Model
 	ShowLog  bool
 	LogData  string
@@ -62,22 +57,25 @@ func InitialModel() Model {
 	vp := viewport.New(80, 20)
 
 	ti := textinput.New()
-	ti.Placeholder = "Optional build label/profile name..."
+	ti.Placeholder = "Enter build label..."
 	ti.CharLimit = 64
 	ti.Width = 40
 
 	return Model{
-		Generations:  []nix.Generation{},
-		Cursor:       0,
-		Focus:        FocusList,
-		ActiveButton: 0,
-		ConfirmModal: false,
-		BuildModal:   false,
-		LabelInput:   ti,
-		IsLoading:    true,
-		LoadingMsg:   "Loading NixOS generations...",
-		Spinner:      s,
-		Viewport:     vp,
+		Generations:      []nix.Generation{},
+		Cursor:           0,
+		Focus:            FocusList,
+		ActiveButton:     0,
+		ConfirmModal:     false,
+		BuildModal:       false,
+		LabelInput:       ti,
+		IsProfile:        true,
+		BuildModalOption: 0,
+		PurgeModalOption: 0,
+		IsLoading:        true,
+		LoadingMsg:       "Loading NixOS generations...",
+		Spinner:          s,
+		Viewport:         vp,
 	}
 }
 
