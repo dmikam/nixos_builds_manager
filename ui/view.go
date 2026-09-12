@@ -33,6 +33,22 @@ func (m Model) View() string {
 		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, msg)
 	}
 
+	if m.AboutModal {
+		return m.renderAboutModal()
+	}
+
+	if m.AnalyzeModal {
+		return m.renderAnalyzeModal()
+	}
+
+	if m.RenameModal {
+		return m.renderRenameModal()
+	}
+
+	if m.SwitchModal {
+		return m.renderSwitchModal()
+	}
+
 	if m.BuildModal {
 		return m.renderBuildModal()
 	}
@@ -69,11 +85,12 @@ func (m Model) View() string {
 	colMark := "Mark"
 	colID := "ID"
 	colLabel := "Build Label"
+	colKernel := "Kernel"
 	colDate := "Date & Time"
 	colStatus := "Status"
 	colTarget := "Nix Store Path Target"
 
-	tblHeader := fmt.Sprintf(" %-4s %-6s %-25s %-18s %-10s %s", colMark, colID, colLabel, colDate, colStatus, colTarget)
+	tblHeader := fmt.Sprintf(" %-4s %-6s %-22s %-16s %-18s %-10s %s", colMark, colID, colLabel, colKernel, colDate, colStatus, colTarget)
 	tblHeaderPadded := fmt.Sprintf("%-*s", mainWidth-4, tblHeader)
 	content.WriteString(styles.TableHeader.Render(tblHeaderPadded) + "\n")
 
@@ -107,18 +124,23 @@ func (m Model) View() string {
 		}
 
 		labelTrunc := g.Label
-		if len(labelTrunc) > 24 {
-			labelTrunc = labelTrunc[:21] + "..."
+		if len(labelTrunc) > 21 {
+			labelTrunc = labelTrunc[:18] + "..."
+		}
+
+		kernelTrunc := g.Kernel
+		if len(kernelTrunc) > 15 {
+			kernelTrunc = kernelTrunc[:12] + "..."
 		}
 
 		dateStr := g.Timestamp.Format("2006-01-02 15:04")
 		targetTrunc := g.Target
-		maxTargetWidth := mainWidth - 72
+		maxTargetWidth := mainWidth - 86
 		if maxTargetWidth > 10 && len(targetTrunc) > maxTargetWidth {
 			targetTrunc = "..." + targetTrunc[len(targetTrunc)-maxTargetWidth+3:]
 		}
 
-		rowStr := fmt.Sprintf(" %-4s %-6d %-25s %-18s %-10s %s", mark, g.ID, labelTrunc, dateStr, status, targetTrunc)
+		rowStr := fmt.Sprintf(" %-4s %-6d %-22s %-16s %-18s %-10s %s", mark, g.ID, labelTrunc, kernelTrunc, dateStr, status, targetTrunc)
 		rowPadded := fmt.Sprintf("%-*s", mainWidth-4, rowStr)
 
 		if i == m.Cursor && m.Focus == FocusList {
@@ -140,29 +162,31 @@ func (m Model) View() string {
 		Render(content.String())
 
 	buttons := []struct {
-		Label    string
+		Text     string
 		Disabled bool
 	}{
-		{"New Build", false},
-		{"Purge Selected", len(m.getSelectedGenerations()) == 0},
-		{"Optimize Store", false},
-		{"Refresh", false},
-		{"Quit", false},
+		{"F1 [A]bout", false},
+		{"F2 [N]ew Build", false},
+		{"F5 [R]efresh", false},
+		{"F6 [O]ptimize", false},
+		{"F7 [C]lean GC", false},
+		{"F8 [P]urge", len(m.getSelectedGenerations()) == 0},
+		{"F10 [Q]uit", false},
 	}
 
 	var btnViews []string
 	for i, btn := range buttons {
 		if btn.Disabled {
-			btnViews = append(btnViews, styles.ButtonDisabled.Render(btn.Label))
+			btnViews = append(btnViews, styles.ButtonDisabled.Render(btn.Text))
 		} else if m.Focus == FocusFooter && m.ActiveButton == i {
-			btnViews = append(btnViews, styles.ButtonActive.Render(btn.Label))
+			btnViews = append(btnViews, styles.ButtonActive.Render(btn.Text))
 		} else {
-			btnViews = append(btnViews, styles.ButtonNormal.Render(btn.Label))
+			btnViews = append(btnViews, styles.ButtonNormal.Render(btn.Text))
 		}
 	}
 
 	leftFooter := strings.Join(btnViews, " ")
-	rightFooter := fmt.Sprintf(" %s ", m.FreeSpace)
+	rightFooter := fmt.Sprintf(" %s | v0.1 ", m.FreeSpace)
 	gapWidth := mainWidth - lipgloss.Width(leftFooter) - lipgloss.Width(rightFooter)
 	if gapWidth < 0 {
 		gapWidth = 0
@@ -179,6 +203,68 @@ func (m Model) View() string {
 	)
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, fullApp)
+}
+
+func (m Model) renderAboutModal() string {
+	msg := fmt.Sprintf(
+		"NIXOS BUILDS MANAGER v0.1\n\nTerminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\nGitHub:\nhttps://github.com/dmikam/nixos-builds-manager\n\nShortcuts:\n[S] - Store Path Analyzer   [E] - Edit Label\n\nPress ESC / Enter / A to close",
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderAnalyzeModal() string {
+	if m.AnalyzeGen == nil {
+		return ""
+	}
+	msg := fmt.Sprintf(
+		"STORE PATH ANALYZER\n\nGeneration: %d (%s)\nStore Path:\n%s\n\nClosure Disk Usage:\n%s\n\nPress ESC / Enter / S to close",
+		m.AnalyzeGen.ID,
+		m.AnalyzeGen.Label,
+		m.AnalyzeGen.Target,
+		m.AnalyzeResult,
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderRenameModal() string {
+	if m.RenameGen == nil {
+		return ""
+	}
+	msg := fmt.Sprintf(
+		"EDIT CUSTOM PROFILE LABEL\n\nGeneration: %d\nPath: %s\n\nNew Label:\n%s\n\nPress Enter to save, ESC to cancel",
+		m.RenameGen.ID,
+		m.RenameGen.Path,
+		m.RenameInput.View(),
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderSwitchModal() string {
+	if m.SwitchTargetGen == nil {
+		return ""
+	}
+
+	btnYes := styles.ButtonNormal.Render(" Yes, Switch ")
+	btnNo := styles.ButtonNormal.Render(" Cancel ")
+
+	if m.SwitchModalOption == 0 {
+		btnYes = styles.ButtonActive.Render(" Yes, Switch ")
+	} else {
+		btnNo = styles.ButtonActive.Render(" Cancel ")
+	}
+
+	msg := fmt.Sprintf(
+		"SWITCH SYSTEM GENERATION\n\nAre you sure you want to switch to:\nGeneration %d (%s)?\n\n%s   %s",
+		m.SwitchTargetGen.ID,
+		m.SwitchTargetGen.Label,
+		btnYes,
+		btnNo,
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
 }
 
 func (m Model) renderBuildModal() string {

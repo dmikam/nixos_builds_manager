@@ -22,6 +22,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Viewport.Height = msg.Height - 8
 
 	case tea.KeyMsg:
+		if m.AboutModal {
+			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "a" || msg.String() == "q" {
+				m.AboutModal = false
+			}
+			return m, nil
+		}
+		if m.AnalyzeModal {
+			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "s" {
+				m.AnalyzeModal = false
+			}
+			return m, nil
+		}
+		if m.RenameModal {
+			return m.handleRenameModalKeys(msg)
+		}
+		if m.SwitchModal {
+			return m.handleSwitchModalKeys(msg)
+		}
 		if m.ConfirmModal {
 			return m.handleModalKeys(msg)
 		}
@@ -80,6 +98,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleRenameModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg.String() {
+	case "enter":
+		if m.RenameGen != nil {
+			err := nix.RenameCustomProfile(*m.RenameGen, m.RenameInput.Value())
+			if err != nil {
+				m.LogData = fmt.Sprintf("Rename failed: %v", err)
+			}
+		}
+		m.RenameModal = false
+		return m, fetchGenerationsCmd()
+	case "esc":
+		m.RenameModal = false
+		return m, nil
+	}
+	m.RenameInput, cmd = m.RenameInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleSwitchModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h", "right", "l", "tab":
+		if m.SwitchModalOption == 0 {
+			m.SwitchModalOption = 1
+		} else {
+			m.SwitchModalOption = 0
+		}
+	case "y", "Y":
+		return m.executeSwitch()
+	case "n", "N", "esc":
+		m.SwitchModal = false
+	case "enter":
+		if m.SwitchModalOption == 0 {
+			return m.executeSwitch()
+		}
+		m.SwitchModal = false
+	}
+	return m, nil
+}
+
+func (m Model) executeSwitch() (tea.Model, tea.Cmd) {
+	if m.SwitchTargetGen == nil {
+		m.SwitchModal = false
+		return m, nil
+	}
+	gen := *m.SwitchTargetGen
+	m.SwitchModal = false
+	m.IsLoading = true
+	m.ShowLog = true
+	m.LogData = fmt.Sprintf("Switching to Generation %d (%s)...\n\n", gen.ID, gen.Label)
+	m.Viewport.SetContent(m.LogData)
+	return m, runSwitchStreamCmd(gen)
 }
 
 func (m Model) handleModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -168,11 +241,10 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if m.BuildModalOption == 4 { // Cancel
+		if m.BuildModalOption == 4 {
 			m.BuildModal = false
 			return m, nil
 		}
-		// Confirm Start Build
 		m.BuildModal = false
 		m.IsLoading = true
 		m.ShowLog = true
@@ -197,29 +269,57 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
-		return m, tea.Quit
+	case "f1", "a":
+		m.AboutModal = true
+		return m, nil
 
-	case "f1", "1":
-		m.ActiveButton = 0
+	case "f2", "n":
+		m.ActiveButton = 1
 		return m.executeButtonAction()
 
-	case "f2", "2":
-		if len(m.getSelectedGenerations()) > 0 {
-			m.ActiveButton = 1
-			return m.executeButtonAction()
-		}
-
-	case "f3", "3":
+	case "f5", "r":
 		m.ActiveButton = 2
 		return m.executeButtonAction()
 
-	case "f4", "4":
+	case "f6", "o":
 		m.ActiveButton = 3
 		return m.executeButtonAction()
 
-	case "f5", "5":
+	case "f7", "c":
+		m.ActiveButton = 4
+		return m.executeButtonAction()
+
+	case "f8", "p":
+		if len(m.getSelectedGenerations()) > 0 {
+			m.ActiveButton = 5
+			return m.executeButtonAction()
+		}
+
+	case "f10", "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "e":
+		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
+			selected := &m.Generations[m.Cursor]
+			m.RenameGen = selected
+			m.RenameInput.SetValue(selected.Label)
+			m.RenameInput.Focus()
+			m.RenameModal = true
+			return m, textinput.Blink
+		}
+
+	case "s":
+		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
+			selected := &m.Generations[m.Cursor]
+			size, err := nix.AnalyzeStorePathSize(selected.Target)
+			if err != nil {
+				size = "Failed to evaluate"
+			}
+			m.AnalyzeGen = selected
+			m.AnalyzeResult = size
+			m.AnalyzeModal = true
+			return m, nil
+		}
 
 	case "tab":
 		if m.Focus == FocusList {
@@ -238,13 +338,13 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Cursor++
 		}
 
-	case "left", "h":
+	case "left":
 		if m.Focus == FocusFooter && m.ActiveButton > 0 {
 			m.ActiveButton--
 		}
 
-	case "right", "l":
-		if m.Focus == FocusFooter && m.ActiveButton < 4 {
+	case "right":
+		if m.Focus == FocusFooter && m.ActiveButton < 6 {
 			m.ActiveButton++
 		}
 
@@ -257,7 +357,15 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		if m.Focus == FocusFooter {
+		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
+			selected := &m.Generations[m.Cursor]
+			if !selected.IsCurrent {
+				m.SwitchTargetGen = selected
+				m.SwitchModal = true
+				m.SwitchModalOption = 0
+				return m, nil
+			}
+		} else if m.Focus == FocusFooter {
 			return m.executeButtonAction()
 		}
 	}
@@ -266,7 +374,9 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	switch m.ActiveButton {
-	case 0: // New Build
+	case 0: // About
+		m.AboutModal = true
+	case 1: // New Build
 		m.BuildModal = true
 		m.BuildModalOption = 0
 		m.IsProfile = false
@@ -274,22 +384,28 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 		m.LabelInput.Reset()
 		m.LabelInput.Focus()
 		return m, textinput.Blink
-	case 1: // Purge Selected
-		if len(m.getSelectedGenerations()) > 0 {
-			m.ConfirmModal = true
-			m.PurgeModalOption = 0
-		}
-	case 2: // Optimize Store
+	case 2: // Refresh
+		m.IsLoading = true
+		m.LoadingMsg = "Refreshing generations..."
+		return m, fetchGenerationsCmd()
+	case 3: // Optimize Store
 		m.IsLoading = true
 		m.ShowLog = true
 		m.LogData = "Optimizing Nix store...\n\n"
 		m.Viewport.SetContent(m.LogData)
 		return m, runOptimizeStreamCmd()
-	case 3: // Refresh
+	case 4: // Clean GC
 		m.IsLoading = true
-		m.LoadingMsg = "Refreshing generations..."
-		return m, fetchGenerationsCmd()
-	case 4: // Quit
+		m.ShowLog = true
+		m.LogData = "Cleaning unreferenced store paths...\n\n"
+		m.Viewport.SetContent(m.LogData)
+		return m, runGarbageCollectStreamCmd()
+	case 5: // Purge Selected
+		if len(m.getSelectedGenerations()) > 0 {
+			m.ConfirmModal = true
+			m.PurgeModalOption = 0
+		}
+	case 6: // Quit
 		return m, tea.Quit
 	}
 	return m, nil
@@ -329,11 +445,35 @@ func runBuildStreamCmd(label string, isProfile bool, switchBuild bool) tea.Cmd {
 	)
 }
 
+func runSwitchStreamCmd(gen nix.Generation) tea.Cmd {
+	globalStreamChan = make(chan string, 100)
+	return tea.Batch(
+		func() tea.Msg {
+			err := nix.SwitchToGenerationStream(gen, globalStreamChan)
+			close(globalStreamChan)
+			return OperationCompletedMsg{Err: err}
+		},
+		waitForStreamCmd(),
+	)
+}
+
 func runPurgeStreamCmd(gens []nix.Generation) tea.Cmd {
 	globalStreamChan = make(chan string, 100)
 	return tea.Batch(
 		func() tea.Msg {
 			err := nix.PurgeGenerationsStream(gens, globalStreamChan)
+			close(globalStreamChan)
+			return OperationCompletedMsg{Err: err}
+		},
+		waitForStreamCmd(),
+	)
+}
+
+func runGarbageCollectStreamCmd() tea.Cmd {
+	globalStreamChan = make(chan string, 100)
+	return tea.Batch(
+		func() tea.Msg {
+			err := nix.CollectGarbageStream(globalStreamChan)
 			close(globalStreamChan)
 			return OperationCompletedMsg{Err: err}
 		},
