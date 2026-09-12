@@ -28,7 +28,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.BuildModal {
 			return m.handleBuildModalKeys(msg)
 		}
-		if m.ShowLog {
+		if m.ShowLog && !m.IsLoading {
 			if msg.String() == "esc" || msg.String() == "q" || msg.String() == "enter" {
 				m.ShowLog = false
 				return m, fetchGenerationsCmd()
@@ -51,22 +51,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case GenerationsLoadedMsg:
 		m.Generations = msg
+		m.FreeSpace = nix.GetNixStoreFreeSpace()
 		m.IsLoading = false
 		if m.Cursor >= len(m.Generations) && len(m.Generations) > 0 {
 			m.Cursor = len(m.Generations) - 1
 		}
 
-	case OperationFinishedMsg:
+	case StreamOutputMsg:
+		m.LogData += string(msg) + "\n"
+		m.Viewport.SetContent(m.LogData)
+		m.Viewport.GotoBottom()
+		return m, waitForStreamCmd()
+
+	case OperationCompletedMsg:
 		m.IsLoading = false
-		m.ConfirmModal = false
-		m.BuildModal = false
+		m.FreeSpace = nix.GetNixStoreFreeSpace()
 		if msg.Err != nil {
-			m.LogData = fmt.Sprintf("Error: %v\n\nOutput:\n%s", msg.Err, msg.Output)
+			m.LogData += fmt.Sprintf("\n[ERROR]: %v\n", msg.Err)
 		} else {
-			m.LogData = fmt.Sprintf("Operation completed successfully!\n\nOutput:\n%s", msg.Output)
+			m.LogData += "\n[SUCCESS]: Operation completed successfully!\n"
 		}
 		m.Viewport.SetContent(m.LogData)
-		m.ShowLog = true
+		m.Viewport.GotoBottom()
 
 	case spinner.TickMsg:
 		m.Spinner, cmd = m.Spinner.Update(msg)
@@ -100,8 +106,10 @@ func (m Model) handleModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) executePurge() (tea.Model, tea.Cmd) {
 	m.ConfirmModal = false
 	m.IsLoading = true
-	m.LoadingMsg = "Purging selected generations..."
-	return m, runPurgeCmd(m.getSelectedGenerations())
+	m.ShowLog = true
+	m.LogData = "Starting purge operation...\n\n"
+	m.Viewport.SetContent(m.LogData)
+	return m, runPurgeStreamCmd(m.getSelectedGenerations())
 }
 
 func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -109,7 +117,7 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "tab":
-		m.BuildModalOption = (m.BuildModalOption + 1) % 4
+		m.BuildModalOption = (m.BuildModalOption + 1) % 5
 		if m.BuildModalOption == 0 {
 			m.LabelInput.Focus()
 		} else {
@@ -118,7 +126,7 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "shift+tab":
-		m.BuildModalOption = (m.BuildModalOption + 3) % 4
+		m.BuildModalOption = (m.BuildModalOption + 4) % 5
 		if m.BuildModalOption == 0 {
 			m.LabelInput.Focus()
 		} else {
@@ -135,7 +143,7 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "down":
-		if m.BuildModalOption < 3 {
+		if m.BuildModalOption < 4 {
 			m.BuildModalOption++
 			if m.BuildModalOption != 0 {
 				m.LabelInput.Blur()
@@ -143,31 +151,36 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "left", "right":
-		if m.BuildModalOption == 2 || m.BuildModalOption == 3 {
-			if m.BuildModalOption == 2 {
-				m.BuildModalOption = 3
+		if m.BuildModalOption == 3 || m.BuildModalOption == 4 {
+			if m.BuildModalOption == 3 {
+				m.BuildModalOption = 4
 			} else {
-				m.BuildModalOption = 2
+				m.BuildModalOption = 3
 			}
 		}
 
 	case " ":
 		if m.BuildModalOption == 1 {
 			m.IsProfile = !m.IsProfile
-			return m, nil
+		} else if m.BuildModalOption == 2 {
+			m.SwitchBuild = !m.SwitchBuild
 		}
+		return m, nil
 
 	case "enter":
-		if m.BuildModalOption == 3 { // Cancel
+		if m.BuildModalOption == 4 { // Cancel
 			m.BuildModal = false
 			return m, nil
 		}
 		// Confirm Start Build
 		m.BuildModal = false
 		m.IsLoading = true
-		label := m.LabelInput.Value()
-		m.LoadingMsg = fmt.Sprintf("Building system (%s)...", label)
-		return m, runBuildCmd(label, m.IsProfile)
+		m.ShowLog = true
+		rawLabel := m.LabelInput.Value()
+		cleanLabel := nix.SanitizeLabel(rawLabel)
+		m.LogData = fmt.Sprintf("Starting build (Label: %s)...\n\n", cleanLabel)
+		m.Viewport.SetContent(m.LogData)
+		return m, runBuildStreamCmd(cleanLabel, m.IsProfile, m.SwitchBuild)
 
 	case "esc":
 		m.BuildModal = false
@@ -256,6 +269,8 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	case 0: // New Build
 		m.BuildModal = true
 		m.BuildModalOption = 0
+		m.IsProfile = false
+		m.SwitchBuild = true
 		m.LabelInput.Reset()
 		m.LabelInput.Focus()
 		return m, textinput.Blink
@@ -266,8 +281,10 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 		}
 	case 2: // Optimize Store
 		m.IsLoading = true
-		m.LoadingMsg = "Optimizing Nix Store..."
-		return m, runOptimizeCmd()
+		m.ShowLog = true
+		m.LogData = "Optimizing Nix store...\n\n"
+		m.Viewport.SetContent(m.LogData)
+		return m, runOptimizeStreamCmd()
 	case 3: // Refresh
 		m.IsLoading = true
 		m.LoadingMsg = "Refreshing generations..."
@@ -288,23 +305,50 @@ func (m Model) getSelectedGenerations() []nix.Generation {
 	return selected
 }
 
-func runBuildCmd(label string, isProfile bool) tea.Cmd {
+var globalStreamChan chan string
+
+func waitForStreamCmd() tea.Cmd {
 	return func() tea.Msg {
-		out, err := nix.RebuildSystem(label, isProfile)
-		return OperationFinishedMsg{Output: out, Err: err}
+		line, ok := <-globalStreamChan
+		if !ok {
+			return nil
+		}
+		return StreamOutputMsg(line)
 	}
 }
 
-func runPurgeCmd(gens []nix.Generation) tea.Cmd {
-	return func() tea.Msg {
-		out, err := nix.PurgeGenerations(gens)
-		return OperationFinishedMsg{Output: out, Err: err}
-	}
+func runBuildStreamCmd(label string, isProfile bool, switchBuild bool) tea.Cmd {
+	globalStreamChan = make(chan string, 100)
+	return tea.Batch(
+		func() tea.Msg {
+			err := nix.RebuildSystemStream(label, isProfile, switchBuild, globalStreamChan)
+			close(globalStreamChan)
+			return OperationCompletedMsg{Err: err}
+		},
+		waitForStreamCmd(),
+	)
 }
 
-func runOptimizeCmd() tea.Cmd {
-	return func() tea.Msg {
-		out, err := nix.OptimizeStore()
-		return OperationFinishedMsg{Output: out, Err: err}
-	}
+func runPurgeStreamCmd(gens []nix.Generation) tea.Cmd {
+	globalStreamChan = make(chan string, 100)
+	return tea.Batch(
+		func() tea.Msg {
+			err := nix.PurgeGenerationsStream(gens, globalStreamChan)
+			close(globalStreamChan)
+			return OperationCompletedMsg{Err: err}
+		},
+		waitForStreamCmd(),
+	)
+}
+
+func runOptimizeStreamCmd() tea.Cmd {
+	globalStreamChan = make(chan string, 100)
+	return tea.Batch(
+		func() tea.Msg {
+			err := nix.OptimizeStoreStream(globalStreamChan)
+			close(globalStreamChan)
+			return OperationCompletedMsg{Err: err}
+		},
+		waitForStreamCmd(),
+	)
 }

@@ -1,7 +1,9 @@
 package nix
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -20,6 +23,24 @@ type Generation struct {
 	Label     string
 	IsCurrent bool
 	Marked    bool
+}
+
+// SanitizeLabel strips unallowed characters from the label.
+// Only alphanumeric characters, dashes, underscores, and dots are allowed.
+func SanitizeLabel(label string) string {
+	re := regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+	sanitized := re.ReplaceAllString(label, "_")
+	return strings.TrimSpace(sanitized)
+}
+
+func GetNixStoreFreeSpace() string {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs("/nix/store", &stat)
+	if err != nil {
+		return "Disk: Unknown"
+	}
+	freeBytes := stat.Bavail * uint64(stat.Bsize)
+	return fmt.Sprintf("Free: %.2f GB", float64(freeBytes)/(1024*1024*1024))
 }
 
 func GetCurrentBootedPath() (string, error) {
@@ -104,70 +125,100 @@ func extractSystemLabel(storePath string) string {
 	return "NixOS System"
 }
 
-func RebuildSystem(label string, isProfile bool) (string, error) {
+func RebuildSystemStream(label string, isProfile bool, switchBuild bool, outChan chan<- string) error {
+	action := "boot"
+	if switchBuild {
+		action = "switch"
+	}
+
+	cleanLabel := SanitizeLabel(label)
+
 	var args []string
 	var env []string
 
-	if strings.TrimSpace(label) != "" {
+	if cleanLabel != "" {
 		if isProfile {
-			args = append(args, "switch", "-p", label)
+			args = append(args, action, "-p", cleanLabel)
 		} else {
-			args = append(args, "switch")
-			env = append(os.Environ(), fmt.Sprintf("NIXOS_LABEL=%s", label))
+			args = append(args, action)
+			env = append(os.Environ(), fmt.Sprintf("NIXOS_LABEL=%s", cleanLabel))
 		}
+		outChan <- fmt.Sprintf("Using sanitized build label: %s", cleanLabel)
 	} else {
-		args = append(args, "switch")
+		args = append(args, action)
 	}
 
-	return runCmdWithEnv(env, "nixos-rebuild", args...)
+	return runCmdStream(env, outChan, "nixos-rebuild", args...)
 }
 
-func PurgeGenerations(gens []Generation) (string, error) {
+func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 	if len(gens) == 0 {
-		return "No generations selected to purge.", nil
+		outChan <- "No generations selected to purge."
+		return nil
 	}
-
-	var outputs []string
 
 	for _, g := range gens {
 		if strings.HasPrefix(g.Path, "/nix/var/nix/profiles/system-profiles/") {
 			_ = os.Remove(g.Path)
 			parentSymlink := strings.TrimSuffix(g.Path, fmt.Sprintf("-%d-link", g.ID))
 			_ = os.Remove(parentSymlink)
-			outputs = append(outputs, fmt.Sprintf("Removed custom profile: %s", g.Label))
+			outChan <- fmt.Sprintf("Removed custom profile: %s", g.Label)
 		} else {
-			out, err := runCmd("nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
+			outChan <- fmt.Sprintf("Deleting generation %d...", g.ID)
+			err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
 			if err != nil {
-				return strings.Join(outputs, "\n") + "\n" + out, err
+				return err
 			}
-			outputs = append(outputs, out)
 		}
 	}
 
-	out2, _ := runCmd("nixos-rebuild", "boot")
-	out3, _ := runCmd("nix-collect-garbage")
+	outChan <- "Rebuilding bootloader menu..."
+	_ = runCmdStream(nil, outChan, "nixos-rebuild", "boot")
 
-	outputs = append(outputs, out2, out3)
-	return strings.Join(outputs, "\n"), nil
+	outChan <- "Collecting garbage..."
+	_ = runCmdStream(nil, outChan, "nix-collect-garbage")
+
+	return nil
 }
 
-func OptimizeStore() (string, error) {
-	return runCmd("nix-store", "--optimise")
+func OptimizeStoreStream(outChan chan<- string) error {
+	return runCmdStream(nil, outChan, "nix-store", "--optimise")
 }
 
-func runCmd(name string, args ...string) (string, error) {
-	return runCmdWithEnv(nil, name, args...)
-}
-
-func runCmdWithEnv(env []string, name string, args ...string) (string, error) {
+func runCmdStream(env []string, outChan chan<- string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
+
+	// Force execution inside /tmp so any generated symlinks stay out of your working directory
+	cmd.Dir = os.TempDir()
+
 	if len(env) > 0 {
 		cmd.Env = env
 	}
-	out, err := cmd.CombinedOutput()
-	outputStr := string(out)
+
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return outputStr, fmt.Errorf("command '%s %s' failed: %w", name, strings.Join(args, " "), err)
+		return err
 	}
-	return outputStr, nil
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	reader := io.MultiReader(stdout, stderr)
+	scanner := bufio.NewScanner(reader)
+
+	for scanner.Scan() {
+		outChan <- scanner.Text()
+	}
+
+	err = cmd.Wait()
+
+	// Cleanup any result symlink left in /tmp after execution
+	_ = os.Remove(filepath.Join(os.TempDir(), "result"))
+
+	return err
 }

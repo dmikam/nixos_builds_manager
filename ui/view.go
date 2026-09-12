@@ -14,19 +14,23 @@ func (m Model) View() string {
 		return "Initializing terminal size..."
 	}
 
-	if m.IsLoading {
-		msg := fmt.Sprintf("%s %s", m.Spinner.View(), m.LoadingMsg)
-		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, msg)
-	}
-
 	if m.ShowLog {
+		hint := "Running operation... please wait."
+		if !m.IsLoading {
+			hint = "Press [ESC / Enter / q] to return"
+		}
 		logView := fmt.Sprintf(
 			"%s\n\n%s\n\n%s",
 			styles.HeaderTitle.Render(" --- OPERATION LOG / OUTPUT --- "),
 			m.Viewport.View(),
-			styles.HeaderInfo.Render("Press [ESC / Enter / q] to return"),
+			styles.HeaderInfo.Render(hint),
 		)
 		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, logView)
+	}
+
+	if m.IsLoading {
+		msg := fmt.Sprintf("%s %s", m.Spinner.View(), m.LoadingMsg)
+		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, msg)
 	}
 
 	if m.BuildModal {
@@ -157,9 +161,15 @@ func (m Model) View() string {
 		}
 	}
 
-	footerContent := strings.Join(btnViews, " ")
-	footerPadded := fmt.Sprintf("%-*s", mainWidth, footerContent)
-	footerView := styles.FooterBarStyle.Render(footerPadded)
+	leftFooter := strings.Join(btnViews, " ")
+	rightFooter := fmt.Sprintf(" %s ", m.FreeSpace)
+	gapWidth := mainWidth - lipgloss.Width(leftFooter) - lipgloss.Width(rightFooter)
+	if gapWidth < 0 {
+		gapWidth = 0
+	}
+
+	footerContent := leftFooter + strings.Repeat(" ", gapWidth) + rightFooter
+	footerView := styles.FooterBarStyle.Render(footerContent)
 
 	fullApp := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -172,28 +182,36 @@ func (m Model) View() string {
 }
 
 func (m Model) renderBuildModal() string {
-	chk := "[ ] As a new Profile"
+	chkProfile := "[ ] As a new Profile"
 	if m.IsProfile {
-		chk = "[X] As a new Profile"
+		chkProfile = "[X] As a new Profile"
+	}
+	if m.BuildModalOption == 1 {
+		chkProfile = styles.ButtonActive.Render(chkProfile)
 	}
 
-	if m.BuildModalOption == 1 {
-		chk = styles.ButtonActive.Render(chk)
+	chkSwitch := "[ ] Switch to this build"
+	if m.SwitchBuild {
+		chkSwitch = "[X] Switch to this build"
+	}
+	if m.BuildModalOption == 2 {
+		chkSwitch = styles.ButtonActive.Render(chkSwitch)
 	}
 
 	btnStart := styles.ButtonNormal.Render(" Start Build ")
 	btnCancel := styles.ButtonNormal.Render(" Cancel ")
 
-	if m.BuildModalOption == 2 {
+	if m.BuildModalOption == 3 {
 		btnStart = styles.ButtonActive.Render(" Start Build ")
-	} else if m.BuildModalOption == 3 {
+	} else if m.BuildModalOption == 4 {
 		btnCancel = styles.ButtonActive.Render(" Cancel ")
 	}
 
 	msg := fmt.Sprintf(
-		"CREATE NEW NIXOS BUILD\n\nLabel:\n%s\n\n%s\n\n%s   %s",
+		"CREATE NEW NIXOS BUILD\n\nLabel:\n%s\n\n%s\n%s\n\n%s   %s",
 		m.LabelInput.View(),
-		chk,
+		chkProfile,
+		chkSwitch,
 		btnStart,
 		btnCancel,
 	)

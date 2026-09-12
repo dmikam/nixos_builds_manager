@@ -23,12 +23,14 @@ type Model struct {
 	Cursor       int
 	Focus        FocusArea
 	ActiveButton int
+	FreeSpace    string
 
 	// Build Modal state
 	BuildModal       bool
 	LabelInput       textinput.Model
 	IsProfile        bool
-	BuildModalOption int // 0: input, 1: checkbox, 2: Start, 3: Cancel
+	SwitchBuild      bool
+	BuildModalOption int // 0: input, 1: profile chk, 2: switch chk, 3: Start, 4: Cancel
 
 	// Purge Modal state
 	ConfirmModal     bool
@@ -46,9 +48,9 @@ type Model struct {
 }
 
 type GenerationsLoadedMsg []nix.Generation
-type OperationFinishedMsg struct {
-	Output string
-	Err    error
+type StreamOutputMsg string
+type OperationCompletedMsg struct {
+	Err error
 }
 
 func InitialModel() Model {
@@ -66,10 +68,12 @@ func InitialModel() Model {
 		Cursor:           0,
 		Focus:            FocusList,
 		ActiveButton:     0,
+		FreeSpace:        nix.GetNixStoreFreeSpace(),
 		ConfirmModal:     false,
 		BuildModal:       false,
 		LabelInput:       ti,
-		IsProfile:        true,
+		IsProfile:        false,
+		SwitchBuild:      true,
 		BuildModalOption: 0,
 		PurgeModalOption: 0,
 		IsLoading:        true,
@@ -90,7 +94,7 @@ func fetchGenerationsCmd() tea.Cmd {
 	return func() tea.Msg {
 		gens, err := nix.ListGenerations()
 		if err != nil {
-			return OperationFinishedMsg{Output: "", Err: err}
+			return OperationCompletedMsg{Err: err}
 		}
 		return GenerationsLoadedMsg(gens)
 	}
