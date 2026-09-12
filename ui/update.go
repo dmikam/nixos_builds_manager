@@ -6,6 +6,7 @@ import (
 	"nixos_builds_manager/nix"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,6 +24,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.ConfirmModal {
 			return m.handleModalKeys(msg)
+		}
+		if m.BuildModal {
+			return m.handleBuildModalKeys(msg)
 		}
 		if m.ShowLog {
 			if msg.String() == "esc" || msg.String() == "q" || msg.String() == "enter" {
@@ -55,6 +59,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OperationFinishedMsg:
 		m.IsLoading = false
 		m.ConfirmModal = false
+		m.BuildModal = false
 		if msg.Err != nil {
 			m.LogData = fmt.Sprintf("Error: %v\n\nOutput:\n%s", msg.Err, msg.Output)
 		} else {
@@ -77,11 +82,38 @@ func (m Model) handleModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ConfirmModal = false
 		m.IsLoading = true
 		m.LoadingMsg = "Purging selected generations..."
-		return m, runPurgeCmd(m.getSelectedIDs())
+		return m, runPurgeCmd(m.getSelectedGenerations())
 	case "n", "N", "esc":
 		m.ConfirmModal = false
 	}
 	return m, nil
+}
+
+func (m Model) getSelectedGenerations() []nix.Generation {
+	var selected []nix.Generation
+	for _, g := range m.Generations {
+		if g.Marked && !g.IsCurrent {
+			selected = append(selected, g)
+		}
+	}
+	return selected
+}
+
+func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg.String() {
+	case "enter":
+		m.BuildModal = false
+		m.IsLoading = true
+		label := m.LabelInput.Value()
+		m.LoadingMsg = fmt.Sprintf("Building new system generation (%s)...", label)
+		return m, runBuildCmd(label)
+	case "esc":
+		m.BuildModal = false
+		return m, nil
+	}
+	m.LabelInput, cmd = m.LabelInput.Update(msg)
+	return m, cmd
 }
 
 func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -112,7 +144,7 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "right", "l":
-		if m.Focus == FocusFooter && m.ActiveButton < 3 {
+		if m.Focus == FocusFooter && m.ActiveButton < 4 {
 			m.ActiveButton++
 		}
 
@@ -134,20 +166,25 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	switch m.ActiveButton {
-	case 0:
+	case 0: // New Build
+		m.BuildModal = true
+		m.LabelInput.Reset()
+		m.LabelInput.Focus()
+		return m, textinput.Blink
+	case 1: // Purge Selected
 		marked := m.getSelectedIDs()
 		if len(marked) > 0 {
 			m.ConfirmModal = true
 		}
-	case 1:
+	case 2: // Optimize Store
 		m.IsLoading = true
 		m.LoadingMsg = "Optimizing Nix Store..."
 		return m, runOptimizeCmd()
-	case 2:
+	case 3: // Refresh
 		m.IsLoading = true
 		m.LoadingMsg = "Refreshing generations..."
 		return m, fetchGenerationsCmd()
-	case 3:
+	case 4: // Quit
 		return m, tea.Quit
 	}
 	return m, nil
@@ -163,9 +200,16 @@ func (m Model) getSelectedIDs() []int {
 	return ids
 }
 
-func runPurgeCmd(ids []int) tea.Cmd {
+func runBuildCmd(label string) tea.Cmd {
 	return func() tea.Msg {
-		out, err := nix.PurgeGenerations(ids)
+		out, err := nix.RebuildSystem(label)
+		return OperationFinishedMsg{Output: out, Err: err}
+	}
+}
+
+func runPurgeCmd(gens []nix.Generation) tea.Cmd {
+	return func() tea.Msg {
+		out, err := nix.PurgeGenerations(gens)
 		return OperationFinishedMsg{Output: out, Err: err}
 	}
 }

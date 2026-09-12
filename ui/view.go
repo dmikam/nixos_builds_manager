@@ -11,7 +11,7 @@ import (
 
 func (m Model) View() string {
 	if m.Width == 0 || m.Height == 0 {
-		return "Initializing..."
+		return "Initializing terminal size..."
 	}
 
 	if m.IsLoading {
@@ -29,21 +29,28 @@ func (m Model) View() string {
 		return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, logView)
 	}
 
-	if m.ConfirmModal {
-		return m.renderModal()
+	if m.BuildModal {
+		return m.renderBuildModal()
 	}
 
+	if m.ConfirmModal {
+		return m.renderConfirmModal()
+	}
+
+	// Calculate panel sizes
 	mainWidth := m.Width - 2
 	if mainWidth < 40 {
 		mainWidth = 40
 	}
 
-	panelHeight := m.Height - 3
-	if panelHeight < 8 {
-		panelHeight = 8
+	headerBarHeight := 1
+	footerBarHeight := 1
+	panelHeight := m.Height - headerBarHeight - footerBarHeight - 1
+	if panelHeight < 10 {
+		panelHeight = 10
 	}
 
-	// 1. Header Bar
+	// 1. Top Header Bar
 	currentGen := "Unknown"
 	for _, g := range m.Generations {
 		if g.IsCurrent {
@@ -51,21 +58,32 @@ func (m Model) View() string {
 			break
 		}
 	}
-	headerText := fmt.Sprintf(" NixOS Builds Manager | Booted: %s ", currentGen)
+	headerText := fmt.Sprintf(" NixOS Builds Manager | Active: %s ", currentGen)
 	headerTextPadded := fmt.Sprintf("%-*s", mainWidth, headerText)
 	headerView := styles.HeaderTitle.Render(headerTextPadded)
 
-	// 2. MC Table Panel
+	// 2. Main Content (MC Panel Style)
 	var content strings.Builder
-	tblHeader := fmt.Sprintf(" %-4s %-6s %-18s %-10s %s", "Mark", "ID", "Date & Time", "Status", "Nix Store Path Target")
+
+	// Table Header inside Panel
+	colMark := "Mark"
+	colID := "ID"
+	colLabel := "Build Label"
+	colDate := "Date & Time"
+	colStatus := "Status"
+	colTarget := "Nix Store Path Target"
+
+	tblHeader := fmt.Sprintf(" %-4s %-6s %-25s %-18s %-10s %s", colMark, colID, colLabel, colDate, colStatus, colTarget)
 	tblHeaderPadded := fmt.Sprintf("%-*s", mainWidth-4, tblHeader)
 	content.WriteString(styles.TableHeader.Render(tblHeaderPadded) + "\n")
 
+	// Max visible rows based on panel height
 	visibleRows := panelHeight - 4
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
 
+	// Calculate pagination scroll window
 	startIdx := 0
 	if m.Cursor >= visibleRows {
 		startIdx = m.Cursor - visibleRows + 1
@@ -90,14 +108,19 @@ func (m Model) View() string {
 			status = styles.MarkedBadge.Render("PURGE")
 		}
 
+		labelTrunc := g.Label
+		if len(labelTrunc) > 24 {
+			labelTrunc = labelTrunc[:21] + "..."
+		}
+
 		dateStr := g.Timestamp.Format("2006-01-02 15:04")
 		targetTrunc := g.Target
-		maxTargetWidth := mainWidth - 45
+		maxTargetWidth := mainWidth - 72
 		if maxTargetWidth > 10 && len(targetTrunc) > maxTargetWidth {
 			targetTrunc = "..." + targetTrunc[len(targetTrunc)-maxTargetWidth+3:]
 		}
 
-		rowStr := fmt.Sprintf(" %-4s %-6d %-18s %-10s %s", mark, g.ID, dateStr, status, targetTrunc)
+		rowStr := fmt.Sprintf(" %-4s %-6d %-25s %-18s %-10s %s", mark, g.ID, labelTrunc, dateStr, status, targetTrunc)
 		rowPadded := fmt.Sprintf("%-*s", mainWidth-4, rowStr)
 
 		if i == m.Cursor && m.Focus == FocusList {
@@ -107,8 +130,9 @@ func (m Model) View() string {
 		}
 	}
 
-	// Pad remaining space
-	for i := endIdx - startIdx; i < visibleRows; i++ {
+	// Fill remaining empty space in panel to maintain height
+	renderedRows := endIdx - startIdx
+	for i := renderedRows; i < visibleRows; i++ {
 		emptyPadded := fmt.Sprintf("%-*s", mainWidth-4, "")
 		content.WriteString(styles.NormalRow.Render(emptyPadded) + "\n")
 	}
@@ -118,15 +142,16 @@ func (m Model) View() string {
 		Height(panelHeight).
 		Render(content.String())
 
-	// 3. Footer Bar
+	// 3. Bottom Footer Bar / Function Keys
 	buttons := []struct {
 		Key   string
 		Label string
 	}{
-		{"F1/1", "Purge Selected"},
-		{"F2/2", "Optimize Store"},
-		{"F3/3", "Refresh"},
-		{"F4/4", "Quit"},
+		{"F1/1", "New Build"},
+		{"F2/2", "Purge Selected"},
+		{"F3/3", "Optimize Store"},
+		{"F4/4", "Refresh"},
+		{"F5/5", "Quit"},
 	}
 
 	var btnViews []string
@@ -143,6 +168,7 @@ func (m Model) View() string {
 	footerPadded := fmt.Sprintf("%-*s", mainWidth, footerContent)
 	footerView := styles.FooterBarStyle.Render(footerPadded)
 
+	// Combine components & center whole layout
 	fullApp := lipgloss.JoinVertical(
 		lipgloss.Left,
 		headerView,
@@ -153,7 +179,16 @@ func (m Model) View() string {
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, fullApp)
 }
 
-func (m Model) renderModal() string {
+func (m Model) renderBuildModal() string {
+	msg := fmt.Sprintf(
+		"CREATE NEW NIXOS BUILD\n\nEnter optional profile label for the build:\n\n%s\n\n[Enter] Start Build  /  [ESC] Cancel",
+		m.LabelInput.View(),
+	)
+	modalView := styles.ModalStyle.Render(msg)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+func (m Model) renderConfirmModal() string {
 	ids := m.getSelectedIDs()
 	msg := fmt.Sprintf(
 		"CONFIRM PURGE GENERATIONS\n\nAre you sure you want to PURGE %d generations?\nIDs: %v\n\n[Y] Yes, proceed  /  [N] Cancel",

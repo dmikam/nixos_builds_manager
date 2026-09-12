@@ -33,25 +33,22 @@ func GetCurrentBootedPath() (string, error) {
 func ListGenerations() ([]Generation, error) {
 	currentPath, _ := GetCurrentBootedPath()
 
+	// 1. Default system profiles
 	files, err := filepath.Glob("/nix/var/nix/profiles/system-*-link")
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan system profiles: %w", err)
 	}
 
-	re := regexp.MustCompile(`system-(\d+)-link$`)
+	// 2. Named profiles
+	profileFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*-link")
+	files = append(files, profileFiles...)
+
+	reSystem := regexp.MustCompile(`system-(\d+)-link$`)
+	reCustom := regexp.MustCompile(`^(.+)-(\d+)-link$`)
+
 	var generations []Generation
 
 	for _, file := range files {
-		matches := re.FindStringSubmatch(file)
-		if len(matches) < 2 {
-			continue
-		}
-
-		id, err := strconv.Atoi(matches[1])
-		if err != nil {
-			continue
-		}
-
 		target, err := os.Readlink(file)
 		if err != nil {
 			target = "Unknown"
@@ -63,7 +60,24 @@ func ListGenerations() ([]Generation, error) {
 			ts = info.ModTime()
 		}
 
-		label := extractSystemLabel(target)
+		var id int
+		var label string
+
+		base := filepath.Base(file)
+		if strings.HasPrefix(file, "/nix/var/nix/profiles/system-profiles/") {
+			matches := reCustom.FindStringSubmatch(base)
+			if len(matches) > 2 {
+				label = matches[1]
+				id, _ = strconv.Atoi(matches[2])
+			}
+		} else {
+			matches := reSystem.FindStringSubmatch(base)
+			if len(matches) > 1 {
+				id, _ = strconv.Atoi(matches[1])
+				label = extractSystemLabel(target)
+			}
+		}
+
 		isCurrent := target == currentPath
 
 		generations = append(generations, Generation{
@@ -78,7 +92,7 @@ func ListGenerations() ([]Generation, error) {
 	}
 
 	sort.Slice(generations, func(i, j int) bool {
-		return generations[i].ID > generations[j].ID
+		return generations[i].Timestamp.After(generations[j].Timestamp)
 	})
 
 	return generations, nil
@@ -92,33 +106,43 @@ func extractSystemLabel(storePath string) string {
 	return "NixOS System"
 }
 
-func PurgeGenerations(ids []int) (string, error) {
-	if len(ids) == 0 {
+func RebuildSystem(label string) (string, error) {
+	args := []string{"switch"}
+	if strings.TrimSpace(label) != "" {
+		args = append(args, "-p", label)
+	}
+	return runCmd("nixos-rebuild", args...)
+}
+
+func PurgeGenerations(gens []Generation) (string, error) {
+	if len(gens) == 0 {
 		return "No generations selected to purge.", nil
 	}
 
-	var strIDs []string
-	for _, id := range ids {
-		strIDs = append(strIDs, strconv.Itoa(id))
+	var outputs []string
+
+	for _, g := range gens {
+		if strings.HasPrefix(g.Path, "/nix/var/nix/profiles/system-profiles/") {
+			// Remove custom profile symlink and its parent link if exists
+			_ = os.Remove(g.Path)
+			parentSymlink := strings.TrimSuffix(g.Path, fmt.Sprintf("-%d-link", g.ID))
+			_ = os.Remove(parentSymlink)
+			outputs = append(outputs, fmt.Sprintf("Removed custom profile: %s", g.Label))
+		} else {
+			// Remove standard system generation
+			out, err := runCmd("nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
+			if err != nil {
+				return strings.Join(outputs, "\n") + "\n" + out, err
+			}
+			outputs = append(outputs, out)
+		}
 	}
 
-	args := append([]string{"-p", "/nix/var/nix/profiles/system", "--delete-generations"}, strIDs...)
-	out1, err := runCmd("nix-env", args...)
-	if err != nil {
-		return out1, fmt.Errorf("failed deleting generations: %w", err)
-	}
+	out2, _ := runCmd("nixos-rebuild", "boot")
+	out3, _ := runCmd("nix-collect-garbage")
 
-	out2, err := runCmd("nixos-rebuild", "boot")
-	if err != nil {
-		return out1 + "\n" + out2, fmt.Errorf("failed rebuilding bootloader: %w", err)
-	}
-
-	out3, err := runCmd("nix-collect-garbage")
-	if err != nil {
-		return out1 + "\n" + out2 + "\n" + out3, fmt.Errorf("failed collecting garbage: %w", err)
-	}
-
-	return out1 + "\n" + out2 + "\n" + out3, nil
+	outputs = append(outputs, out2, out3)
+	return strings.Join(outputs, "\n"), nil
 }
 
 func OptimizeStore() (string, error) {

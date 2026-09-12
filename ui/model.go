@@ -4,6 +4,7 @@ import (
 	"nixos_builds_manager/nix"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -15,6 +16,15 @@ const (
 	FocusFooter
 )
 
+type CommandType int
+
+const (
+	CmdNone CommandType = iota
+	CmdPurge
+	CmdOptimize
+	CmdBuild
+)
+
 type Model struct {
 	Width        int
 	Height       int
@@ -23,10 +33,15 @@ type Model struct {
 	Focus        FocusArea
 	ActiveButton int
 
+	// Dialog & Modal state
 	ConfirmModal bool
-	IsLoading    bool
-	LoadingMsg   string
+	BuildModal   bool
+	LabelInput   textinput.Model
 
+	IsLoading  bool
+	LoadingMsg string
+
+	// Log Output
 	Viewport viewport.Model
 	ShowLog  bool
 	LogData  string
@@ -46,12 +61,19 @@ func InitialModel() Model {
 	s.Spinner = spinner.Dot
 	vp := viewport.New(80, 20)
 
+	ti := textinput.New()
+	ti.Placeholder = "Optional build label/profile name..."
+	ti.CharLimit = 64
+	ti.Width = 40
+
 	return Model{
 		Generations:  []nix.Generation{},
 		Cursor:       0,
 		Focus:        FocusList,
 		ActiveButton: 0,
 		ConfirmModal: false,
+		BuildModal:   false,
+		LabelInput:   ti,
 		IsLoading:    true,
 		LoadingMsg:   "Loading NixOS generations...",
 		Spinner:      s,
