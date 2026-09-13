@@ -151,6 +151,7 @@ All mutating operations run through `runCmdStream(...)`:
   - Switches profile pointer via `nix-env -p /nix/var/nix/profiles/system --switch-generation <ID>`.
   - Executes system activation script: `<gen.Path>/bin/switch-to-configuration switch` (or `/nix/var/nix/profiles/system/bin/switch-to-configuration switch`).
 - **`PurgeGenerationsStream(gens, outChan)`**:
+  - Checks if `/nix/var/nix/profiles/system` points to any generation marked for purge (via `GetCurrentProfileGenerationID()`). If so, switches the profile pointer to a retained generation (preferring the currently booted system) using `nix-env --switch-generation` to avoid `cannot delete current version of profile` errors.
   - Sequentially deletes specified generations via `nix-env -p /nix/var/nix/profiles/system --delete-generations <ID>`.
   - Updates the bootloader menu via `/nix/var/nix/profiles/system/bin/switch-to-configuration boot` (avoids creating a new generation).
   - Collects garbage via `nix-collect-garbage`.

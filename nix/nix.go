@@ -50,6 +50,20 @@ func GetCurrentBootedPath() (string, error) {
 	return target, nil
 }
 
+func GetCurrentProfileGenerationID() (int, error) {
+	target, err := os.Readlink("/nix/var/nix/profiles/system")
+	if err != nil {
+		return 0, fmt.Errorf("failed to readlink /nix/var/nix/profiles/system: %w", err)
+	}
+	base := filepath.Base(target)
+	re := regexp.MustCompile(`system-(\d+)-link$`)
+	matches := re.FindStringSubmatch(base)
+	if len(matches) > 1 {
+		return strconv.Atoi(matches[1])
+	}
+	return 0, fmt.Errorf("could not determine generation ID from profile target: %s", target)
+}
+
 func ListGenerations() ([]Generation, error) {
 	currentPath, _ := GetCurrentBootedPath()
 
@@ -246,6 +260,52 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 	if len(gens) == 0 {
 		outChan <- "No generations selected to purge."
 		return nil
+	}
+
+	// Check if any generation to be deleted is currently pointed to by /nix/var/nix/profiles/system
+	profileID, err := GetCurrentProfileGenerationID()
+	if err == nil {
+		isDeletingProfileTarget := false
+		for _, g := range gens {
+			if g.ID == profileID {
+				isDeletingProfileTarget = true
+				break
+			}
+		}
+
+		if isDeletingProfileTarget {
+			allGens, _ := ListGenerations()
+			var safeGen *Generation
+			// 1. Prefer the currently booted system
+			for i := range allGens {
+				if allGens[i].IsCurrent {
+					safeGen = &allGens[i]
+					break
+				}
+			}
+			// 2. Fallback to newest generation that is not being purged
+			if safeGen == nil {
+				purgeSet := make(map[int]bool)
+				for _, g := range gens {
+					purgeSet[g.ID] = true
+				}
+				for i := range allGens {
+					if !purgeSet[allGens[i].ID] {
+						safeGen = &allGens[i]
+						break
+					}
+				}
+			}
+
+			if safeGen != nil {
+				outChan <- fmt.Sprintf("Profile points to Generation %d (scheduled for deletion).", profileID)
+				outChan <- fmt.Sprintf("Switching profile pointer to Generation %d first...", safeGen.ID)
+				err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--switch-generation", strconv.Itoa(safeGen.ID))
+				if err != nil {
+					return fmt.Errorf("failed to switch profile pointer: %w", err)
+				}
+			}
+		}
 	}
 
 	for _, g := range gens {
