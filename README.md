@@ -13,3 +13,4 @@ docker compose up build
 ## Releases
 
 To publish a new release, create a "v[version number]" tag.
+test
