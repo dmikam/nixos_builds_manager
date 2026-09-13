@@ -8,3 +8,7 @@ Compile the static binary using Docker Compose:
 
 ```bash
 docker compose up build
+
+## Releases
+
+To publish a new release, create a "v<version numeber>" tag.
