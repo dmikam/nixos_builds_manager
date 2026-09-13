@@ -10,6 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Version is set dynamically at build time via -ldflags
+var Version = "dev"
+
 func (m Model) View() string {
 	if m.Width == 0 || m.Height == 0 {
 		return "Initializing terminal size..."
@@ -251,7 +254,7 @@ func (m Model) View() string {
 	}
 
 	leftFooter := strings.Join(btnViews, " ")
-	rightFooter := fmt.Sprintf(" %s | v0.1 ", m.FreeSpace)
+	rightFooter := fmt.Sprintf(" %s | %s ", m.FreeSpace, Version)
 	gapWidth := mainWidth - lipgloss.Width(leftFooter) - lipgloss.Width(rightFooter)
 	if gapWidth < 0 {
 		gapWidth = 0
@@ -287,7 +290,7 @@ func (m Model) renderAboutModal() string {
 	}
 
 	msg := fmt.Sprintf(
-		"NIXOS BUILDS MANAGER v0.1\n\n"+
+		"NIXOS BUILDS MANAGER %s\n\n"+
 			"Terminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\n"+
 			"ACTIVE CONFIGURATION:\n"+
 			"  Type:        %s\n"+
@@ -298,6 +301,7 @@ func (m Model) renderAboutModal() string {
 			"GitHub:\n"+
 			"https://github.com/dmikam/nixos-builds-manager\n\n"+
 			"Press ESC / Enter / A / Q to close",
+		Version,
 		m.EnvInfo.ConfigType,
 		m.EnvInfo.ConfigPath,
 		m.EnvInfo.FlakeHost,
