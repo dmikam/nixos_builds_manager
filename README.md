@@ -8,6 +8,7 @@ Compile the static binary using Docker Compose:
 
 ```bash
 docker compose up build
+```
 
 ## Releases
 
