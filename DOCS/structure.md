@@ -149,10 +149,10 @@ All mutating operations run through `runCmdStream(...)`:
   - Applies `-p <label>` for profiles or sets environment variable `NIXOS_LABEL=<label>`.
 - **`SwitchToGenerationStream(gen, outChan)`**:
   - Switches profile pointer via `nix-env -p /nix/var/nix/profiles/system --switch-generation <ID>`.
-  - Executes system activation script: `<gen.Path>/bin/switch switch` (or falls back to `nixos-rebuild switch`).
+  - Executes system activation script: `<gen.Path>/bin/switch-to-configuration switch` (or `/nix/var/nix/profiles/system/bin/switch-to-configuration switch`).
 - **`PurgeGenerationsStream(gens, outChan)`**:
   - Sequentially deletes specified generations via `nix-env -p /nix/var/nix/profiles/system --delete-generations <ID>`.
-  - Re-generates the bootloader menu via `nixos-rebuild boot`.
+  - Updates the bootloader menu via `/nix/var/nix/profiles/system/bin/switch-to-configuration boot` (avoids creating a new generation).
   - Collects garbage via `nix-collect-garbage`.
 - **`OptimizeStoreStream(outChan)`**:
   - Hard-links identical files across the Nix store using `nix-store --optimise`.
@@ -344,7 +344,8 @@ sudo ./bin/nixos_builds_manager
 4. **Execution Resilience & Fallbacks**:
    - Storage size measurement first attempts `nix path-info -S`; if unavailable, it falls back to `du -sh`.
    - Kernel extraction inspects both `/kernel` and `/kernel-modules`.
-   - Switching generations checks for `<gen>/bin/switch` and falls back to `nixos-rebuild switch`.
+   - Switching generations checks for `<gen>/bin/switch-to-configuration` (and falls back to `/nix/var/nix/profiles/system/bin/switch-to-configuration`).
+   - Updating bootloader menu invokes `/nix/var/nix/profiles/system/bin/switch-to-configuration boot` to update GRUB / systemd-boot without triggering unwanted builds.
 5. **Non-Blocking UI**:
    - All Nix subprocess execution occurs in separate goroutines connected via buffered channels, ensuring that terminal UI rendering and spinners remain responsive regardless of command duration.
 

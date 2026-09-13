@@ -229,12 +229,17 @@ func SwitchToGenerationStream(gen Generation, outChan chan<- string) error {
 	}
 
 	outChan <- "Activating system configuration..."
-	switchScript := filepath.Join(gen.Path, "bin", "switch")
+	switchScript := filepath.Join(gen.Path, "bin", "switch-to-configuration")
 	if _, err := os.Stat(switchScript); err == nil {
 		return runCmdStream(nil, outChan, switchScript, "switch")
 	}
 
-	return runCmdStream(nil, outChan, "nixos-rebuild", "switch")
+	systemSwitchScript := "/nix/var/nix/profiles/system/bin/switch-to-configuration"
+	if _, err := os.Stat(systemSwitchScript); err == nil {
+		return runCmdStream(nil, outChan, systemSwitchScript, "switch")
+	}
+
+	return fmt.Errorf("failed to locate switch-to-configuration script at %s", switchScript)
 }
 
 func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
@@ -252,7 +257,14 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 	}
 
 	outChan <- "Rebuilding bootloader menu..."
-	_ = runCmdStream(nil, outChan, "nixos-rebuild", "boot")
+	bootScript := "/nix/var/nix/profiles/system/bin/switch-to-configuration"
+	if _, err := os.Stat(bootScript); err == nil {
+		if err := runCmdStream(nil, outChan, bootScript, "boot"); err != nil {
+			outChan <- fmt.Sprintf("Warning: failed to update bootloader menu: %v", err)
+		}
+	} else {
+		outChan <- "Warning: switch-to-configuration not found, skipping bootloader menu update"
+	}
 
 	outChan <- "Collecting garbage..."
 	_ = runCmdStream(nil, outChan, "nix-collect-garbage")
