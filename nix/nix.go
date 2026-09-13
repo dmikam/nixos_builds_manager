@@ -13,8 +13,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 type Generation struct {
@@ -60,11 +58,7 @@ func ListGenerations() ([]Generation, error) {
 		return nil, fmt.Errorf("failed to scan system profiles: %w", err)
 	}
 
-	profileFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*-link")
-	files = append(files, profileFiles...)
-
 	reSystem := regexp.MustCompile(`system-(\d+)-link$`)
-	reCustom := regexp.MustCompile(`^(.+)-(\d+)-link$`)
 
 	seenIDs := make(map[int]bool)
 	var generations []Generation
@@ -75,7 +69,6 @@ func ListGenerations() ([]Generation, error) {
 			target = "Unknown"
 		}
 
-		// Use Lstat on the symlink itself (store path targets are reset to 1970 by Nix)
 		var ts time.Time
 		if info, err := os.Lstat(file); err == nil {
 			ts = info.ModTime()
@@ -85,18 +78,10 @@ func ListGenerations() ([]Generation, error) {
 		var label string
 
 		base := filepath.Base(file)
-		if strings.HasPrefix(file, "/nix/var/nix/profiles/system-profiles/") {
-			matches := reCustom.FindStringSubmatch(base)
-			if len(matches) > 2 {
-				label = matches[1]
-				id, _ = strconv.Atoi(matches[2])
-			}
-		} else {
-			matches := reSystem.FindStringSubmatch(base)
-			if len(matches) > 1 {
-				id, _ = strconv.Atoi(matches[1])
-				label = extractSystemLabel(target)
-			}
+		matches := reSystem.FindStringSubmatch(base)
+		if len(matches) > 1 {
+			id, _ = strconv.Atoi(matches[1])
+			label = extractSystemLabel(target)
 		}
 
 		if id > 0 && seenIDs[id] {
@@ -120,7 +105,6 @@ func ListGenerations() ([]Generation, error) {
 		})
 	}
 
-	// Keep list ordered by Generation ID descending
 	sort.Slice(generations, func(i, j int) bool {
 		return generations[i].ID > generations[j].ID
 	})
@@ -210,54 +194,6 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// Helper function to update timestamp on a symlink directly
-func setSymlinkTimestamp(path string, ts time.Time) error {
-	times := []unix.Timespec{
-		unix.NsecToTimespec(ts.UnixNano()), // Access time
-		unix.NsecToTimespec(ts.UnixNano()), // Modification time
-	}
-	return unix.UtimesNanoAt(unix.AT_FDCWD, path, times, unix.AT_SYMLINK_NOFOLLOW)
-}
-
-func RenameCustomProfile(gen Generation, newLabel string) error {
-	cleanLabel := SanitizeLabel(newLabel)
-	if cleanLabel == "" {
-		return fmt.Errorf("invalid or empty label")
-	}
-
-	origTimestamp := gen.Timestamp
-
-	// 1. Rename existing custom profile symlink while maintaining original timestamp
-	if strings.HasPrefix(gen.Path, "/nix/var/nix/profiles/system-profiles/") {
-		dir := filepath.Dir(gen.Path)
-		newPath := filepath.Join(dir, fmt.Sprintf("%s-%d-link", cleanLabel, gen.ID))
-		if err := os.Rename(gen.Path, newPath); err != nil {
-			return err
-		}
-		_ = setSymlinkTimestamp(newPath, origTimestamp)
-		return nil
-	}
-
-	// 2. Create custom profile symlink, copy original timestamp, remove standard symlink
-	profileDir := "/nix/var/nix/profiles/system-profiles"
-	_ = os.MkdirAll(profileDir, 0755)
-
-	newProfileLink := filepath.Join(profileDir, fmt.Sprintf("%s-%d-link", cleanLabel, gen.ID))
-	_ = os.Remove(newProfileLink)
-
-	if err := os.Symlink(gen.Target, newProfileLink); err != nil {
-		return fmt.Errorf("failed to create symlink: %w", err)
-	}
-
-	// Restore original symlink timestamp
-	_ = setSymlinkTimestamp(newProfileLink, origTimestamp)
-
-	// Remove default symlink to prevent legacy accumulation
-	_ = os.Remove(gen.Path)
-
-	return nil
-}
-
 func RebuildSystemStream(label string, isProfile bool, switchBuild bool, outChan chan<- string) error {
 	action := "boot"
 	if switchBuild {
@@ -308,17 +244,10 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 	}
 
 	for _, g := range gens {
-		if strings.HasPrefix(g.Path, "/nix/var/nix/profiles/system-profiles/") {
-			_ = os.Remove(g.Path)
-			parentSymlink := strings.TrimSuffix(g.Path, fmt.Sprintf("-%d-link", g.ID))
-			_ = os.Remove(parentSymlink)
-			outChan <- fmt.Sprintf("Removed custom profile: %s", g.Label)
-		} else {
-			outChan <- fmt.Sprintf("Deleting generation %d...", g.ID)
-			err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
-			if err != nil {
-				return err
-			}
+		outChan <- fmt.Sprintf("Deleting generation %d...", g.ID)
+		err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
+		if err != nil {
+			return err
 		}
 	}
 

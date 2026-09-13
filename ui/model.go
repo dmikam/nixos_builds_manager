@@ -26,12 +26,12 @@ type Model struct {
 	FreeSpace    string
 
 	// Modals
-	AboutModal        bool
-	BuildModal        bool
-	LabelInput        textinput.Model
-	IsProfile         bool
-	SwitchBuild       bool
-	BuildModalOption  int
+	AboutModal       bool
+	BuildModal       bool
+	LabelInput       textinput.Model
+	IsProfile        bool
+	SwitchBuild      bool
+	BuildModalOption int
 
 	ConfirmModal     bool
 	PurgeModalOption int
@@ -49,10 +49,6 @@ type Model struct {
 	SwitchModal       bool
 	SwitchTargetGen   *nix.Generation
 	SwitchModalOption int
-
-	RenameModal bool
-	RenameGen   *nix.Generation
-	RenameInput textinput.Model
 
 	AnalyzeModal  bool
 	AnalyzeGen    *nix.Generation
@@ -85,11 +81,6 @@ func InitialModel() Model {
 	ti.CharLimit = 64
 	ti.Width = 40
 
-	ri := textinput.New()
-	ri.Placeholder = "Enter new label..."
-	ri.CharLimit = 64
-	ri.Width = 40
-
 	return Model{
 		Generations:          []nix.Generation{},
 		Cursor:               0,
@@ -103,11 +94,9 @@ func InitialModel() Model {
 		ConfirmQuitModal:     false,
 		BuildModal:           false,
 		SwitchModal:          false,
-		RenameModal:          false,
 		AnalyzeModal:         false,
 		SwitchModalOption:    0,
 		LabelInput:           ti,
-		RenameInput:          ri,
 		IsProfile:            false,
 		SwitchBuild:          true,
 		BuildModalOption:     0,

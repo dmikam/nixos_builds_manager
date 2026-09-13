@@ -43,9 +43,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ConfirmQuitModal {
 			return m.handleQuitModalKeys(msg)
 		}
-		if m.RenameModal {
-			return m.handleRenameModalKeys(msg)
-		}
 		if m.SwitchModal {
 			return m.handleSwitchModalKeys(msg)
 		}
@@ -176,26 +173,6 @@ func (m Model) handleQuitModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ConfirmQuitModal = false
 	}
 	return m, nil
-}
-
-func (m Model) handleRenameModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	switch msg.String() {
-	case "enter":
-		if m.RenameGen != nil {
-			err := nix.RenameCustomProfile(*m.RenameGen, m.RenameInput.Value())
-			if err != nil {
-				m.LogData = fmt.Sprintf("Rename failed: %v", err)
-			}
-		}
-		m.RenameModal = false
-		return m, fetchGenerationsCmd()
-	case "esc":
-		m.RenameModal = false
-		return m, nil
-	}
-	m.RenameInput, cmd = m.RenameInput.Update(msg)
-	return m, cmd
 }
 
 func (m Model) handleSwitchModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -351,33 +328,29 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.AboutModal = true
 		return m, nil
 
-	case "f2", "e":
+	case "f3", "n":
 		m.ActiveButton = 1
 		return m.executeButtonAction()
 
-	case "f3", "n":
+	case "f4", "s":
 		m.ActiveButton = 2
 		return m.executeButtonAction()
 
-	case "f4", "s":
+	case "f5", "r":
 		m.ActiveButton = 3
 		return m.executeButtonAction()
 
-	case "f5", "r":
+	case "f6", "o":
 		m.ActiveButton = 4
 		return m.executeButtonAction()
 
-	case "f6", "o":
-		m.ActiveButton = 5
-		return m.executeButtonAction()
-
 	case "f7", "c":
-		m.ActiveButton = 6
+		m.ActiveButton = 5
 		return m.executeButtonAction()
 
 	case "f8", "p":
 		if len(m.getSelectedGenerations()) > 0 {
-			m.ActiveButton = 7
+			m.ActiveButton = 6
 			return m.executeButtonAction()
 		}
 
@@ -409,7 +382,7 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "right":
-		if m.Focus == FocusFooter && m.ActiveButton < 8 {
+		if m.Focus == FocusFooter && m.ActiveButton < 7 {
 			m.ActiveButton++
 		}
 
@@ -441,16 +414,7 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	switch m.ActiveButton {
 	case 0: // About
 		m.AboutModal = true
-	case 1: // Rename
-		if len(m.Generations) > m.Cursor {
-			selected := &m.Generations[m.Cursor]
-			m.RenameGen = selected
-			m.RenameInput.SetValue(selected.Label)
-			m.RenameInput.Focus()
-			m.RenameModal = true
-			return m, textinput.Blink
-		}
-	case 2: // New Build
+	case 1: // New Build (F3 / N)
 		m.BuildModal = true
 		m.BuildModalOption = 0
 		m.IsProfile = false
@@ -458,7 +422,7 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 		m.LabelInput.Reset()
 		m.LabelInput.Focus()
 		return m, textinput.Blink
-	case 3: // Analyze Storage
+	case 2: // Storage (F4 / S)
 		if len(m.Generations) > m.Cursor {
 			selected := &m.Generations[m.Cursor]
 			size, err := nix.AnalyzeStorePathSize(selected.Target)
@@ -470,22 +434,22 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 			m.AnalyzeModal = true
 			return m, nil
 		}
-	case 4: // Refresh
+	case 3: // Refresh (F5 / R)
 		m.IsLoading = true
 		m.LoadingMsg = "Refreshing generations..."
 		return m, fetchGenerationsCmd()
-	case 5: // Optimize Store
+	case 4: // Optimize (F6 / O)
 		m.ConfirmOptimizeModal = true
 		m.OptimizeModalOption = 0
-	case 6: // Clean GC
+	case 5: // Clean GC (F7 / C)
 		m.ConfirmGCModal = true
 		m.GCModalOption = 0
-	case 7: // Purge Selected
+	case 6: // Purge (F8 / P)
 		if len(m.getSelectedGenerations()) > 0 {
 			m.ConfirmModal = true
 			m.PurgeModalOption = 0
 		}
-	case 8: // Quit
+	case 7: // Quit (F10 / Q)
 		m.ConfirmQuitModal = true
 		m.QuitModalOption = 0
 	}

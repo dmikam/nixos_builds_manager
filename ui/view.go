@@ -41,10 +41,6 @@ func (m Model) View() string {
 		return m.renderAnalyzeModal()
 	}
 
-	if m.RenameModal {
-		return m.renderRenameModal()
-	}
-
 	if m.SwitchModal {
 		return m.renderSwitchModal()
 	}
@@ -178,7 +174,6 @@ func (m Model) View() string {
 		Disabled bool
 	}{
 		{"F1 [A]bout", false},
-		{"F2 R[e]name", false},
 		{"F3 [N]ew Build", false},
 		{"F4 [S]torage", false},
 		{"F5 [R]efresh", false},
@@ -232,25 +227,11 @@ func (m Model) renderAnalyzeModal() string {
 		return ""
 	}
 	msg := fmt.Sprintf(
-		"STORE PATH ANALYZER\n\nGeneration: %d (%s)\nStore Path:\n%s\n\nClosure Disk Usage:\n%s\n\nPress ESC / Enter / S / F4 to close",
+		"STORE PATH ANALYZER\n\nGeneration: %d (%s)\nStore Path:\n%s\n\nClosure Disk Usage:\n%s\n\nPress ESC / Enter / S / F3 to close",
 		m.AnalyzeGen.ID,
 		m.AnalyzeGen.Label,
 		m.AnalyzeGen.Target,
 		m.AnalyzeResult,
-	)
-	modalView := styles.ModalStyle.Render(msg)
-	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
-}
-
-func (m Model) renderRenameModal() string {
-	if m.RenameGen == nil {
-		return ""
-	}
-	msg := fmt.Sprintf(
-		"EDIT CUSTOM PROFILE LABEL\n\nGeneration: %d\nPath: %s\n\nNew Label:\n%s\n\nPress Enter to save, ESC to cancel",
-		m.RenameGen.ID,
-		m.RenameGen.Path,
-		m.RenameInput.View(),
 	)
 	modalView := styles.ModalStyle.Render(msg)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)
