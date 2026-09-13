@@ -24,6 +24,7 @@ type Model struct {
 	Focus        FocusArea
 	ActiveButton int
 	FreeSpace    string
+	EnvInfo      nix.EnvironmentInfo
 
 	// Modals
 	AboutModal       bool
@@ -87,6 +88,7 @@ func InitialModel() Model {
 		Focus:                FocusList,
 		ActiveButton:         0,
 		FreeSpace:            nix.GetNixStoreFreeSpace(),
+		EnvInfo:              nix.DetectEnvironment(),
 		AboutModal:           false,
 		ConfirmModal:         false,
 		ConfirmOptimizeModal: false,

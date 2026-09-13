@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"nixos_builds_manager/nix"
 	"nixos_builds_manager/ui/styles"
 
 	"github.com/charmbracelet/lipgloss"
@@ -70,7 +71,7 @@ func (m Model) View() string {
 		mainWidth = 40
 	}
 
-	headerBarHeight := 1
+	headerBarHeight := 2
 	footerBarHeight := 1
 	panelHeight := m.Height - headerBarHeight - footerBarHeight - 1
 	if panelHeight < 10 {
@@ -84,9 +85,56 @@ func (m Model) View() string {
 			break
 		}
 	}
-	headerText := fmt.Sprintf(" NixOS Builds Manager | Active: %s ", currentGen)
+	headerLeft := fmt.Sprintf(" NixOS Builds Manager | Active: %s ", currentGen)
+	headerRight := fmt.Sprintf(" Host: %s | %s ", m.EnvInfo.FlakeHost, m.FreeSpace)
+	gapTop := mainWidth - lipgloss.Width(headerLeft) - lipgloss.Width(headerRight)
+	if gapTop < 0 {
+		gapTop = 0
+	}
+	headerText := headerLeft + strings.Repeat(" ", gapTop) + headerRight
 	headerTextPadded := fmt.Sprintf("%-*s", mainWidth, headerText)
 	headerView := styles.HeaderTitle.Render(headerTextPadded)
+
+	var badge string
+	var configDetails string
+
+	switch m.EnvInfo.ConfigType {
+	case nix.ConfigTypeFlake:
+		badge = styles.BadgeFlake.Render("FLAKE")
+		gitSuffix := ""
+		if m.EnvInfo.GitRev != "" {
+			dirty := ""
+			if m.EnvInfo.GitDirty {
+				dirty = "*"
+			}
+			gitSuffix = fmt.Sprintf(" [%s%s]", m.EnvInfo.GitRev, dirty)
+		}
+		hostSuffix := ""
+		if m.EnvInfo.FlakeHost != "" {
+			hostSuffix = fmt.Sprintf(" (#%s)", m.EnvInfo.FlakeHost)
+		}
+		configDetails = fmt.Sprintf("%s %s%s%s", badge, m.EnvInfo.ConfigPath, hostSuffix, gitSuffix)
+
+	case nix.ConfigTypeClassic:
+		badge = styles.BadgeClassic.Render("CLASSIC")
+		flakeStatus := "Flakes: Disabled"
+		if m.EnvInfo.IsFlakeSupported {
+			flakeStatus = "Flakes: Supported"
+		}
+		configDetails = fmt.Sprintf("%s %s (%s)", badge, m.EnvInfo.ConfigPath, flakeStatus)
+
+	default:
+		badge = styles.BadgeNone.Render("CONFIG")
+		configDetails = fmt.Sprintf("%s No configuration file detected (/etc/nixos)", badge)
+	}
+
+	if lipgloss.Width(configDetails) > mainWidth-4 && mainWidth > 14 {
+		configDetails = configDetails[:mainWidth-7] + "..."
+	}
+
+	subHeaderContent := " " + configDetails + " "
+	subHeaderPadded := fmt.Sprintf("%-*s", mainWidth, subHeaderContent)
+	subHeaderView := styles.SubHeader.Render(subHeaderPadded)
 
 	var content strings.Builder
 
@@ -207,6 +255,7 @@ func (m Model) View() string {
 	fullApp := lipgloss.JoinVertical(
 		lipgloss.Left,
 		headerView,
+		subHeaderView,
 		panelView,
 		footerView,
 	)
@@ -215,8 +264,37 @@ func (m Model) View() string {
 }
 
 func (m Model) renderAboutModal() string {
+	flakeState := "Disabled"
+	if m.EnvInfo.IsFlakeSupported {
+		flakeState = "Enabled in nix.conf"
+	}
+
+	gitInfo := "N/A"
+	if m.EnvInfo.GitRev != "" {
+		dirty := ""
+		if m.EnvInfo.GitDirty {
+			dirty = " (dirty working tree)"
+		}
+		gitInfo = fmt.Sprintf("%s%s", m.EnvInfo.GitRev, dirty)
+	}
+
 	msg := fmt.Sprintf(
-		"NIXOS BUILDS MANAGER v0.1\n\nTerminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\nGitHub:\nhttps://github.com/dmikam/nixos-builds-manager\n\nPress ESC / Enter / A / Q to close",
+		"NIXOS BUILDS MANAGER v0.1\n\n"+
+			"Terminal UI tool to manage, switch, purge, and analyze NixOS system generations.\n\n"+
+			"ACTIVE CONFIGURATION:\n"+
+			"  Type:        %s\n"+
+			"  Path:        %s\n"+
+			"  Host:        %s\n"+
+			"  Flake Feat:  %s\n"+
+			"  Git Commit:  %s\n\n"+
+			"GitHub:\n"+
+			"https://github.com/dmikam/nixos-builds-manager\n\n"+
+			"Press ESC / Enter / A / Q to close",
+		m.EnvInfo.ConfigType,
+		m.EnvInfo.ConfigPath,
+		m.EnvInfo.FlakeHost,
+		flakeState,
+		gitInfo,
 	)
 	modalView := styles.ModalStyle.Render(msg)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, modalView)

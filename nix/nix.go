@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,6 +15,24 @@ import (
 	"syscall"
 	"time"
 )
+
+type ConfigType string
+
+const (
+	ConfigTypeFlake   ConfigType = "Flake"
+	ConfigTypeClassic ConfigType = "Classic"
+	ConfigTypeNone    ConfigType = "None"
+)
+
+type EnvironmentInfo struct {
+	IsFlakeSupported bool
+	ConfigType       ConfigType
+	ConfigPath       string
+	FlakeURI         string
+	FlakeHost        string
+	GitDirty         bool
+	GitRev           string
+}
 
 type Generation struct {
 	ID        int
@@ -24,6 +43,144 @@ type Generation struct {
 	Kernel    string
 	IsCurrent bool
 	Marked    bool
+}
+
+func DetectEnvironment() EnvironmentInfo {
+	info := EnvironmentInfo{
+		IsFlakeSupported: checkFlakeSupported(),
+		ConfigType:       ConfigTypeNone,
+		ConfigPath:       "None",
+		FlakeHost:        resolveHostname(),
+	}
+
+	// 1. Check NIXOS_FLAKE environment variable
+	if envFlake := os.Getenv("NIXOS_FLAKE"); envFlake != "" {
+		parts := strings.Split(envFlake, "#")
+		flakeDir := parts[0]
+		targetPath := filepath.Join(flakeDir, "flake.nix")
+		if _, err := os.Stat(targetPath); err == nil {
+			info.ConfigType = ConfigTypeFlake
+			info.ConfigPath = targetPath
+			info.FlakeURI = flakeDir
+			if len(parts) > 1 && parts[1] != "" {
+				info.FlakeHost = parts[1]
+			}
+			checkGitInfo(&info)
+			return info
+		}
+	}
+
+	// 2. Candidate flake directories
+	candidates := getFlakeCandidates()
+	for _, cand := range candidates {
+		flakePath := filepath.Join(cand, "flake.nix")
+		if _, err := os.Stat(flakePath); err == nil {
+			info.ConfigType = ConfigTypeFlake
+			info.ConfigPath = flakePath
+			info.FlakeURI = cand
+			checkGitInfo(&info)
+			return info
+		}
+	}
+
+	// 3. Check for classic configuration.nix
+	classicCandidates := []string{
+		"/etc/nixos/configuration.nix",
+	}
+	if userHome := getUserHome(); userHome != "" {
+		classicCandidates = append(classicCandidates, filepath.Join(userHome, ".config/nixos/configuration.nix"))
+	}
+
+	for _, path := range classicCandidates {
+		if _, err := os.Stat(path); err == nil {
+			info.ConfigType = ConfigTypeClassic
+			info.ConfigPath = path
+			return info
+		}
+	}
+
+	return info
+}
+
+func getFlakeCandidates() []string {
+	var candidates []string
+
+	// Current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, cwd)
+	}
+
+	// Standard system location
+	candidates = append(candidates, "/etc/nixos")
+
+	// User locations
+	if userHome := getUserHome(); userHome != "" {
+		candidates = append(candidates,
+			filepath.Join(userHome, ".config/nixos"),
+			filepath.Join(userHome, ".config/nixpkgs"),
+			filepath.Join(userHome, "dotfiles"),
+			filepath.Join(userHome, "dotfiles/nixos"),
+			filepath.Join(userHome, "nixos-config"),
+			filepath.Join(userHome, "nixos"),
+			filepath.Join(userHome, "dev/nixos"),
+		)
+	}
+
+	return candidates
+}
+
+func getUserHome() string {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" && sudoUser != "root" {
+		if u, err := user.Lookup(sudoUser); err == nil && u.HomeDir != "" {
+			return u.HomeDir
+		}
+		return filepath.Join("/home", sudoUser)
+	}
+	if home := os.Getenv("HOME"); home != "" && home != "/root" {
+		return home
+	}
+	return ""
+}
+
+func checkFlakeSupported() bool {
+	data, err := os.ReadFile("/etc/nix/nix.conf")
+	if err == nil {
+		content := string(data)
+		if strings.Contains(content, "flakes") {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveHostname() string {
+	if data, err := os.ReadFile("/etc/hostname"); err == nil {
+		h := strings.TrimSpace(string(data))
+		if h != "" {
+			return h
+		}
+	}
+	if h, err := os.Hostname(); err == nil {
+		return strings.TrimSpace(h)
+	}
+	return "localhost"
+}
+
+func checkGitInfo(info *EnvironmentInfo) {
+	gitDir := filepath.Join(info.FlakeURI, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return
+	}
+	cmd := exec.Command("git", "-C", info.FlakeURI, "rev-parse", "--short", "HEAD")
+	if out, err := cmd.Output(); err == nil {
+		info.GitRev = strings.TrimSpace(string(out))
+	}
+	cmdDirty := exec.Command("git", "-C", info.FlakeURI, "status", "--porcelain")
+	if outDirty, err := cmdDirty.Output(); err == nil {
+		if len(strings.TrimSpace(string(outDirty))) > 0 {
+			info.GitDirty = true
+		}
+	}
 }
 
 func SanitizeLabel(label string) string {

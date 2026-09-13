@@ -76,6 +76,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case GenerationsLoadedMsg:
 		m.Generations = msg
 		m.FreeSpace = nix.GetNixStoreFreeSpace()
+		m.EnvInfo = nix.DetectEnvironment()
 		m.IsLoading = false
 		if m.Cursor >= len(m.Generations) && len(m.Generations) > 0 {
 			m.Cursor = len(m.Generations) - 1
@@ -90,6 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case OperationCompletedMsg:
 		m.IsLoading = false
 		m.FreeSpace = nix.GetNixStoreFreeSpace()
+		m.EnvInfo = nix.DetectEnvironment()
 		if msg.Err != nil {
 			m.LogData += fmt.Sprintf("\n[ERROR]: %v\n", msg.Err)
 		} else {

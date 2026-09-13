@@ -116,8 +116,19 @@ This package is responsible for discovering NixOS generations, querying store in
   - `Kernel string`: Kernel version string extracted from `<storePath>/kernel` or `<storePath>/kernel-modules`.
   - `IsCurrent bool`: `true` if target path matches `/run/current-system`.
   - `Marked bool`: User selection toggle for batch purge operations.
+- **`EnvironmentInfo` Struct & `ConfigType`**:
+  - `IsFlakeSupported bool`: Checks whether Nix Flakes feature is enabled in `/etc/nix/nix.conf`.
+  - `ConfigType ConfigType`: Mode of active system configuration (`Flake`, `Classic`, or `None`).
+  - `ConfigPath string`: Absolute path to active configuration file (e.g. `/etc/nixos/flake.nix` or `/etc/nixos/configuration.nix`).
+  - `FlakeURI string`: Directory URI of the active flake.
+  - `FlakeHost string`: Target system hostname (from `/etc/hostname` or `os.Hostname()`).
+  - `GitRev string` & `GitDirty bool`: Short Git commit hash and working tree status if flake is in a git repository.
 
 #### 4.2.2 System Queries
+- **`DetectEnvironment() EnvironmentInfo`**:
+  - Automatically identifies whether the system uses Flakes or traditional Channels.
+  - Inspects `NIXOS_FLAKE` environment variable, current working directory, Git roots, `/etc/nixos/flake.nix`, user config directories (`~/.config/nixos`, `~/dotfiles`, etc.), and `/etc/nixos/configuration.nix`.
+  - Inspects `/etc/nix/nix.conf` for `experimental-features = ... flakes ...`.
 - **`GetNixStoreFreeSpace() string`**:
   - Executes `syscall.Statfs("/nix/store", &stat)`.
   - Calculates free disk space via `stat.Bavail * stat.Bsize` and formats it as `Free: X.XX GB`.
@@ -258,11 +269,12 @@ Operations that run long CLI commands (`nixos-rebuild`, `nix-store`, etc.) use a
 
 ### 4.5 Visual Design & Layout (`ui/view.go` & `ui/styles/styles.go`)
 
-The layout follows a 3-row vertical partition using Lip Gloss (`Header`, `Panel`, `Footer`):
+The layout follows a 4-part vertical partition using Lip Gloss (`Header`, `SubHeader`, `Panel`, `Footer`):
 
 ```
 +-------------------------------------------------------------------------------+
-| NixOS Builds Manager | Active: Gen 42 (24.05.20240501)                       | <- Header
+| NixOS Builds Manager | Active: Gen 42 (24.05.20240501)       Host: myhost | Free: 48.2 GB | <- Header
+| [CLASSIC] /etc/nixos/configuration.nix (Flakes: Supported)                    | <- SubHeader
 +-------------------------------------------------------------------------------+
 | Mark  ID     Build Label            Kernel           Date & Time      Status  |
 |-------------------------------------------------------------------------------|

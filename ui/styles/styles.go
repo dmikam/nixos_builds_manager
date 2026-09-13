@@ -61,4 +61,26 @@ var (
 			BorderForeground(lipgloss.Color("#10B981")).
 			Background(lipgloss.Color("#000000")).
 			Padding(1, 2)
+
+	SubHeader = lipgloss.NewStyle().
+			Background(lipgloss.Color("#111827")).
+			Foreground(lipgloss.Color("#9CA3AF"))
+
+	BadgeFlake = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#000000")).
+			Background(lipgloss.Color("#38BDF8")).
+			Padding(0, 1)
+
+	BadgeClassic = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#000000")).
+			Background(lipgloss.Color("#F59E0B")).
+			Padding(0, 1)
+
+	BadgeNone = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#6B7280")).
+			Padding(0, 1)
 )
