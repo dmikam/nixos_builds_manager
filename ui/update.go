@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"nixos_builds_manager/nix"
 
@@ -205,9 +206,12 @@ func (m Model) executeSwitch() (tea.Model, tea.Cmd) {
 	}
 	gen := *m.SwitchTargetGen
 	m.SwitchModal = false
+	if gen.IsOrphan {
+		return m, nil
+	}
 	m.IsLoading = true
 	m.ShowLog = true
-	m.LogData = fmt.Sprintf("Switching to Generation %d (%s)...\n\n", gen.ID, gen.Label)
+	m.LogData = fmt.Sprintf("Switching to %s Generation %d (%s)...\n\n", gen.Profile, gen.ID, gen.Label)
 	m.Viewport.SetContent(m.LogData)
 	return m, runSwitchStreamCmd(gen)
 }
@@ -399,7 +403,7 @@ func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.Focus == FocusList && len(m.Generations) > m.Cursor {
 			selected := &m.Generations[m.Cursor]
-			if !selected.IsCurrent {
+			if !selected.IsCurrent && !selected.IsOrphan {
 				m.SwitchTargetGen = selected
 				m.SwitchModal = true
 				m.SwitchModalOption = 0
@@ -427,9 +431,15 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 	case 2: // Storage (F4 / S)
 		if len(m.Generations) > m.Cursor {
 			selected := &m.Generations[m.Cursor]
-			size, err := nix.AnalyzeStorePathSize(selected.Target)
-			if err != nil {
-				size = "Failed to evaluate"
+			var size string
+			if strings.Contains(selected.Target, "(closure deleted)") {
+				size = "Closure already deleted from Nix store"
+			} else {
+				var err error
+				size, err = nix.AnalyzeStorePathSize(selected.Target)
+				if err != nil {
+					size = "Failed to evaluate"
+				}
 			}
 			m.AnalyzeGen = selected
 			m.AnalyzeResult = size

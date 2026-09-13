@@ -140,13 +140,14 @@ func (m Model) View() string {
 
 	colMark := "Mark"
 	colID := "ID"
+	colProfile := "Profile"
 	colLabel := "Build Label"
 	colKernel := "Kernel"
 	colDate := "Date & Time"
 	colStatus := "Status"
 	colTarget := "Nix Store Path Target"
 
-	tblHeader := fmt.Sprintf(" %-4s %-6s %-22s %-16s %-18s %-10s %s", colMark, colID, colLabel, colKernel, colDate, colStatus, colTarget)
+	tblHeader := fmt.Sprintf(" %-4s %-5s %-16s %-20s %-14s %-16s %-10s %s", colMark, colID, colProfile, colLabel, colKernel, colDate, colStatus, colTarget)
 	tblHeaderPadded := fmt.Sprintf("%-*s", mainWidth-4, tblHeader)
 	content.WriteString(styles.TableHeader.Render(tblHeaderPadded) + "\n")
 
@@ -175,28 +176,35 @@ func (m Model) View() string {
 		status := " "
 		if g.IsCurrent {
 			status = styles.CurrentBadge.Render("CURRENT")
+		} else if g.IsOrphan {
+			status = styles.OrphanBadge.Render("ORPHAN")
 		} else if g.Marked {
 			status = styles.MarkedBadge.Render("PURGE")
 		}
 
+		profileTrunc := g.Profile
+		if len(profileTrunc) > 15 {
+			profileTrunc = profileTrunc[:12] + "..."
+		}
+
 		labelTrunc := g.Label
-		if len(labelTrunc) > 21 {
-			labelTrunc = labelTrunc[:18] + "..."
+		if len(labelTrunc) > 19 {
+			labelTrunc = labelTrunc[:16] + "..."
 		}
 
 		kernelTrunc := g.Kernel
-		if len(kernelTrunc) > 15 {
-			kernelTrunc = kernelTrunc[:12] + "..."
+		if len(kernelTrunc) > 13 {
+			kernelTrunc = kernelTrunc[:10] + "..."
 		}
 
 		dateStr := g.Timestamp.Format("2006-01-02 15:04")
 		targetTrunc := g.Target
-		maxTargetWidth := mainWidth - 86
+		maxTargetWidth := mainWidth - 92
 		if maxTargetWidth > 10 && len(targetTrunc) > maxTargetWidth {
 			targetTrunc = "..." + targetTrunc[len(targetTrunc)-maxTargetWidth+3:]
 		}
 
-		rowStr := fmt.Sprintf(" %-4s %-6d %-22s %-16s %-18s %-10s %s", mark, g.ID, labelTrunc, kernelTrunc, dateStr, status, targetTrunc)
+		rowStr := fmt.Sprintf(" %-4s %-5d %-16s %-20s %-14s %-16s %-10s %s", mark, g.ID, profileTrunc, labelTrunc, kernelTrunc, dateStr, status, targetTrunc)
 		rowPadded := fmt.Sprintf("%-*s", mainWidth-4, rowStr)
 
 		if i == m.Cursor && m.Focus == FocusList {
@@ -330,7 +338,8 @@ func (m Model) renderSwitchModal() string {
 	}
 
 	msg := fmt.Sprintf(
-		"SWITCH SYSTEM GENERATION\n\nAre you sure you want to switch to:\nGeneration %d (%s)?\n\n%s   %s",
+		"SWITCH SYSTEM GENERATION\n\nAre you sure you want to switch to:\n[%s] Generation %d (%s)?\n\n%s   %s",
+		m.SwitchTargetGen.Profile,
 		m.SwitchTargetGen.ID,
 		m.SwitchTargetGen.Label,
 		btnYes,

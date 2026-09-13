@@ -108,13 +108,15 @@ This package is responsible for discovering NixOS generations, querying store in
 
 #### 4.2.1 Data Models
 - **`Generation` Struct**:
-  - `ID int`: Generation sequence number extracted from symlink names.
-  - `Path string`: Full symlink path (e.g. `/nix/var/nix/profiles/system-42-link`).
+  - `ID int`: Generation sequence number extracted from symlink names or bootloader configs.
+  - `Profile string`: Name of profile (`system` for default, or named profile like `EnableXRDP`).
+  - `Path string`: Full symlink path or boot entry path (e.g. `/boot/loader/entries/nixos-generation-13.conf`).
   - `Target string`: Resolved Nix store path (e.g. `/nix/store/...-nixos-system-...`).
-  - `Timestamp time.Time`: Generation creation/build timestamp based on symlink `ModTime()`.
-  - `Label string`: Human-readable version label extracted from `<storePath>/nixos-version`.
+  - `Timestamp time.Time`: Generation creation timestamp based on symlink or `.conf` `ModTime()`.
+  - `Label string`: Human-readable version label extracted from `<storePath>/nixos-version` or bootloader metadata.
   - `Kernel string`: Kernel version string extracted from `<storePath>/kernel` or `<storePath>/kernel-modules`.
   - `IsCurrent bool`: `true` if target path matches `/run/current-system`.
+  - `IsOrphan bool`: `true` if generation entry only exists in `/boot/loader/entries/` and has no active profile symlink.
   - `Marked bool`: User selection toggle for batch purge operations.
 - **`EnvironmentInfo` Struct & `ConfigType`**:
   - `IsFlakeSupported bool`: Checks whether Nix Flakes feature is enabled in `/etc/nix/nix.conf`.
@@ -135,11 +137,13 @@ This package is responsible for discovering NixOS generations, querying store in
 - **`GetCurrentBootedPath() (string, error)`**:
   - Calls `os.Readlink("/run/current-system")` to determine the currently active system generation store path.
 - **`ListGenerations() ([]Generation, error)`**:
-  - Scans `/nix/var/nix/profiles/system-*-link` using `filepath.Glob`.
-  - Matches filenames against `system-(\d+)-link$` to extract generation IDs.
-  - Deduplicates IDs using a tracking map.
+  - Multi-source generation discovery across:
+    1. Default system profiles: `/nix/var/nix/profiles/system-*-link`
+    2. Custom named profiles: `/nix/var/nix/profiles/system-profiles/*-link` (created via `nixos-rebuild -p <name>`)
+    3. Bootloader entries: `/boot/loader/entries/*.conf` (detects orphaned entries whose profile links were previously deleted).
+  - Deduplicates by composite key `(Profile, ID)`.
   - Inspects targets to extract labels and kernel versions.
-  - Sorts generations in descending order by ID (newest first).
+  - Sorts generations in descending order by timestamp and ID (newest first).
   - Flags the entry matching `GetCurrentBootedPath()` as `IsCurrent = true`.
 - **`extractSystemLabel(storePath string) string`**:
   - Reads `<storePath>/nixos-version`. Returns `"NixOS System"` on failure.
@@ -159,12 +163,15 @@ All mutating operations run through `runCmdStream(...)`:
   - Sanitizes labels using `SanitizeLabel` (replacing non-alphanumeric chars with `_`).
   - Applies `-p <label>` for profiles or sets environment variable `NIXOS_LABEL=<label>`.
 - **`SwitchToGenerationStream(gen, outChan)`**:
-  - Switches profile pointer via `nix-env -p /nix/var/nix/profiles/system --switch-generation <ID>`.
-  - Executes system activation script: `<gen.Path>/bin/switch-to-configuration switch` (or `/nix/var/nix/profiles/system/bin/switch-to-configuration switch`).
+  - Switches profile pointer via `nix-env -p <profilePath> --switch-generation <ID>`.
+  - Executes system activation script: `<gen.Target>/bin/switch-to-configuration switch` (activates configuration without rebuilding).
+  - Disallows switching directly to orphaned entries lacking profile links.
 - **`PurgeGenerationsStream(gens, outChan)`**:
-  - Checks if `/nix/var/nix/profiles/system` points to any generation marked for purge (via `GetCurrentProfileGenerationID()`). If so, switches the profile pointer to a retained generation (preferring the currently booted system) using `nix-env --switch-generation` to avoid `cannot delete current version of profile` errors.
-  - Sequentially deletes specified generations via `nix-env -p /nix/var/nix/profiles/system --delete-generations <ID>`.
-  - Updates the bootloader menu via `/nix/var/nix/profiles/system/bin/switch-to-configuration boot` (avoids creating a new generation).
+  - Handles orphaned bootloader entries by removing their `.conf` files directly from `/boot/loader/entries/`.
+  - For active generations, handles active profile pointer auto-switching to avoid `cannot delete current version of profile` errors.
+  - Deletes specified generations via `nix-env -p <profilePath> --delete-generations <ID>`.
+  - Cleans up empty profile pointers in `/nix/var/nix/profiles/system-profiles/` if all generations in a named profile were purged.
+  - Updates the bootloader menu via `/nix/var/nix/profiles/system/bin/switch-to-configuration boot`.
   - Collects garbage via `nix-collect-garbage`.
 - **`OptimizeStoreStream(outChan)`**:
   - Hard-links identical files across the Nix store using `nix-store --optimise`.

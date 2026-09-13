@@ -36,12 +36,14 @@ type EnvironmentInfo struct {
 
 type Generation struct {
 	ID        int
+	Profile   string
 	Path      string
 	Target    string
 	Timestamp time.Time
 	Label     string
 	Kernel    string
 	IsCurrent bool
+	IsOrphan  bool
 	Marked    bool
 }
 
@@ -221,18 +223,58 @@ func GetCurrentProfileGenerationID() (int, error) {
 	return 0, fmt.Errorf("could not determine generation ID from profile target: %s", target)
 }
 
+func parseBootConf(confPath string) (target string, label string, kernel string) {
+	f, err := os.Open(confPath)
+	if err != nil {
+		return "", "Orphaned Boot Entry", "Unknown"
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	reInit := regexp.MustCompile(`init=(/nix/store/[^ \t\r\n]+)/init`)
+	reVersion := regexp.MustCompile(`^version\s+(.+)$`)
+	reLinux := regexp.MustCompile(`^linux\s+(.+)$`)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if matches := reInit.FindStringSubmatch(line); len(matches) > 1 {
+			target = matches[1]
+		}
+		if matches := reVersion.FindStringSubmatch(line); len(matches) > 1 {
+			label = matches[1]
+		}
+		if matches := reLinux.FindStringSubmatch(line); len(matches) > 1 {
+			kernel = filepath.Base(matches[1])
+		}
+	}
+
+	if target != "" {
+		if _, err := os.Stat(target); err == nil {
+			if l := extractSystemLabel(target); l != "NixOS System" {
+				label = l
+			}
+			if k := extractKernelVersion(target); k != "Unknown" {
+				kernel = k
+			}
+		} else {
+			target = target + " (closure deleted)"
+		}
+	}
+	if label == "" {
+		label = "Orphaned Boot Entry"
+	}
+	return target, label, kernel
+}
+
 func ListGenerations() ([]Generation, error) {
 	currentPath, _ := GetCurrentBootedPath()
 
-	files, err := filepath.Glob("/nix/var/nix/profiles/system-*-link")
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan system profiles: %w", err)
-	}
-
-	reSystem := regexp.MustCompile(`system-(\d+)-link$`)
-
-	seenIDs := make(map[int]bool)
+	seenKeys := make(map[string]bool)
 	var generations []Generation
+
+	// 1. Default system profile generations: /nix/var/nix/profiles/system-*-link
+	files, _ := filepath.Glob("/nix/var/nix/profiles/system-*-link")
+	reSystem := regexp.MustCompile(`system-(\d+)-link$`)
 
 	for _, file := range files {
 		target, err := os.Readlink(file)
@@ -255,34 +297,133 @@ func ListGenerations() ([]Generation, error) {
 			label = extractSystemLabel(target)
 		}
 
-		if id > 0 && seenIDs[id] {
+		key := fmt.Sprintf("system:%d", id)
+		if id > 0 && seenKeys[key] {
 			continue
 		}
 		if id > 0 {
-			seenIDs[id] = true
+			seenKeys[key] = true
 		}
 
 		kernelVer := extractKernelVersion(target)
 
 		generations = append(generations, Generation{
 			ID:        id,
+			Profile:   "system",
 			Path:      file,
 			Target:    target,
 			Timestamp: ts,
 			Label:     label,
 			Kernel:    kernelVer,
 			IsCurrent: false,
+			IsOrphan:  false,
 			Marked:    false,
 		})
 	}
 
+	// 2. Custom named profiles: /nix/var/nix/profiles/system-profiles/*-link
+	namedFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*-link")
+	reNamed := regexp.MustCompile(`^(.+)-(\d+)-link$`)
+
+	for _, file := range namedFiles {
+		base := filepath.Base(file)
+		matches := reNamed.FindStringSubmatch(base)
+		if len(matches) <= 2 {
+			continue
+		}
+
+		profileName := matches[1]
+		id, _ := strconv.Atoi(matches[2])
+		key := fmt.Sprintf("%s:%d", profileName, id)
+		if seenKeys[key] {
+			continue
+		}
+		seenKeys[key] = true
+
+		target, err := os.Readlink(file)
+		if err != nil {
+			target = "Unknown"
+		}
+
+		var ts time.Time
+		if info, err := os.Lstat(file); err == nil {
+			ts = info.ModTime()
+		}
+
+		label := extractSystemLabel(target)
+		kernelVer := extractKernelVersion(target)
+
+		generations = append(generations, Generation{
+			ID:        id,
+			Profile:   profileName,
+			Path:      file,
+			Target:    target,
+			Timestamp: ts,
+			Label:     label,
+			Kernel:    kernelVer,
+			IsCurrent: false,
+			IsOrphan:  false,
+			Marked:    false,
+		})
+	}
+
+	// 3. Bootloader entries: /boot/loader/entries/*.conf
+	bootEntries, _ := filepath.Glob("/boot/loader/entries/*.conf")
+	reSysConf := regexp.MustCompile(`^nixos-generation-(\d+)\.conf$`)
+	reNamedConf := regexp.MustCompile(`^nixos-(.+)-generation-(\d+)\.conf$`)
+
+	for _, confFile := range bootEntries {
+		base := filepath.Base(confFile)
+		var profile string
+		var id int
+
+		if matches := reSysConf.FindStringSubmatch(base); len(matches) > 1 {
+			profile = "system"
+			id, _ = strconv.Atoi(matches[1])
+		} else if matches := reNamedConf.FindStringSubmatch(base); len(matches) > 2 {
+			profile = matches[1]
+			id, _ = strconv.Atoi(matches[2])
+		} else {
+			continue
+		}
+
+		key := fmt.Sprintf("%s:%d", profile, id)
+		if seenKeys[key] {
+			continue
+		}
+		seenKeys[key] = true
+
+		target, label, kernel := parseBootConf(confFile)
+		var ts time.Time
+		if info, err := os.Stat(confFile); err == nil {
+			ts = info.ModTime()
+		}
+
+		generations = append(generations, Generation{
+			ID:        id,
+			Profile:   profile,
+			Path:      confFile,
+			Target:    target,
+			Timestamp: ts,
+			Label:     label,
+			Kernel:    kernel,
+			IsCurrent: false,
+			IsOrphan:  true,
+			Marked:    false,
+		})
+	}
+
+	// Sort: newest timestamp first; if equal, highest ID first
 	sort.Slice(generations, func(i, j int) bool {
-		return generations[i].ID > generations[j].ID
+		if generations[i].Timestamp.Equal(generations[j].Timestamp) {
+			return generations[i].ID > generations[j].ID
+		}
+		return generations[i].Timestamp.After(generations[j].Timestamp)
 	})
 
 	currentFound := false
 	for i := range generations {
-		if generations[i].Target == currentPath && !currentFound {
+		if !generations[i].IsOrphan && generations[i].Target == currentPath && !currentFound {
 			generations[i].IsCurrent = true
 			currentFound = true
 		}
@@ -392,22 +533,39 @@ func RebuildSystemStream(label string, isProfile bool, switchBuild bool, outChan
 }
 
 func SwitchToGenerationStream(gen Generation, outChan chan<- string) error {
-	outChan <- fmt.Sprintf("Switching active system to Generation %d (%s)...", gen.ID, gen.Label)
+	if gen.IsOrphan {
+		return fmt.Errorf("cannot switch to orphaned generation: generation symlink no longer exists in profiles")
+	}
 
-	err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--switch-generation", strconv.Itoa(gen.ID))
+	outChan <- fmt.Sprintf("Switching active system to %s (Gen %d - %s)...", gen.Profile, gen.ID, gen.Label)
+
+	profilePath := "/nix/var/nix/profiles/system"
+	if gen.Profile != "system" && gen.Profile != "" {
+		profilePath = filepath.Join("/nix/var/nix/profiles/system-profiles", gen.Profile)
+	}
+
+	err := runCmdStream(nil, outChan, "nix-env", "-p", profilePath, "--switch-generation", strconv.Itoa(gen.ID))
 	if err != nil {
-		return fmt.Errorf("failed to switch generation symlink: %w", err)
+		outChan <- fmt.Sprintf("Note: profile pointer update: %v", err)
 	}
 
 	outChan <- "Activating system configuration..."
-	switchScript := filepath.Join(gen.Path, "bin", "switch-to-configuration")
+	// 1. Try store path target directly
+	switchScript := filepath.Join(gen.Target, "bin", "switch-to-configuration")
 	if _, err := os.Stat(switchScript); err == nil {
 		return runCmdStream(nil, outChan, switchScript, "switch")
 	}
 
-	systemSwitchScript := "/nix/var/nix/profiles/system/bin/switch-to-configuration"
-	if _, err := os.Stat(systemSwitchScript); err == nil {
-		return runCmdStream(nil, outChan, systemSwitchScript, "switch")
+	// 2. Try link path
+	switchScriptGen := filepath.Join(gen.Path, "bin", "switch-to-configuration")
+	if _, err := os.Stat(switchScriptGen); err == nil {
+		return runCmdStream(nil, outChan, switchScriptGen, "switch")
+	}
+
+	// 3. Try profile pointer
+	profileSwitchScript := filepath.Join(profilePath, "bin", "switch-to-configuration")
+	if _, err := os.Stat(profileSwitchScript); err == nil {
+		return runCmdStream(nil, outChan, profileSwitchScript, "switch")
 	}
 
 	return fmt.Errorf("failed to locate switch-to-configuration script at %s", switchScript)
@@ -419,35 +577,36 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 		return nil
 	}
 
-	// Check if any generation to be deleted is currently pointed to by /nix/var/nix/profiles/system
-	profileID, err := GetCurrentProfileGenerationID()
-	if err == nil {
-		isDeletingProfileTarget := false
-		for _, g := range gens {
-			if g.ID == profileID {
-				isDeletingProfileTarget = true
-				break
+	for _, g := range gens {
+		if g.IsOrphan {
+			outChan <- fmt.Sprintf("Removing orphaned bootloader entry: %s...", filepath.Base(g.Path))
+			if err := os.Remove(g.Path); err != nil {
+				outChan <- fmt.Sprintf("Warning: failed to remove %s: %v", g.Path, err)
 			}
+			continue
 		}
 
-		if isDeletingProfileTarget {
+		profilePath := "/nix/var/nix/profiles/system"
+		if g.Profile != "system" && g.Profile != "" {
+			profilePath = filepath.Join("/nix/var/nix/profiles/system-profiles", g.Profile)
+		}
+
+		// Handle auto-switch if active profile pointer
+		profileTarget, err := os.Readlink(profilePath)
+		if err == nil && filepath.Base(profileTarget) == filepath.Base(g.Path) {
 			allGens, _ := ListGenerations()
 			var safeGen *Generation
-			// 1. Prefer the currently booted system
+			// Prefer currently booted system if same profile
 			for i := range allGens {
-				if allGens[i].IsCurrent {
+				if allGens[i].Profile == g.Profile && allGens[i].IsCurrent && allGens[i].ID != g.ID && !allGens[i].IsOrphan {
 					safeGen = &allGens[i]
 					break
 				}
 			}
-			// 2. Fallback to newest generation that is not being purged
+			// Fallback to any other non-orphan gen in this profile
 			if safeGen == nil {
-				purgeSet := make(map[int]bool)
-				for _, g := range gens {
-					purgeSet[g.ID] = true
-				}
 				for i := range allGens {
-					if !purgeSet[allGens[i].ID] {
+					if allGens[i].Profile == g.Profile && allGens[i].ID != g.ID && !allGens[i].IsOrphan {
 						safeGen = &allGens[i]
 						break
 					}
@@ -455,21 +614,22 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 			}
 
 			if safeGen != nil {
-				outChan <- fmt.Sprintf("Profile points to Generation %d (scheduled for deletion).", profileID)
-				outChan <- fmt.Sprintf("Switching profile pointer to Generation %d first...", safeGen.ID)
-				err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--switch-generation", strconv.Itoa(safeGen.ID))
-				if err != nil {
-					return fmt.Errorf("failed to switch profile pointer: %w", err)
-				}
+				outChan <- fmt.Sprintf("Profile %s points to Gen %d (scheduled for deletion).", g.Profile, g.ID)
+				outChan <- fmt.Sprintf("Switching profile pointer to Gen %d first...", safeGen.ID)
+				_ = runCmdStream(nil, outChan, "nix-env", "-p", profilePath, "--switch-generation", strconv.Itoa(safeGen.ID))
 			}
 		}
-	}
 
-	for _, g := range gens {
-		outChan <- fmt.Sprintf("Deleting generation %d...", g.ID)
-		err := runCmdStream(nil, outChan, "nix-env", "-p", "/nix/var/nix/profiles/system", "--delete-generations", strconv.Itoa(g.ID))
+		outChan <- fmt.Sprintf("Deleting %s generation %d...", g.Profile, g.ID)
+		err = runCmdStream(nil, outChan, "nix-env", "-p", profilePath, "--delete-generations", strconv.Itoa(g.ID))
 		if err != nil {
+			outChan <- fmt.Sprintf("Error deleting generation: %v", err)
 			return err
+		}
+
+		// If named profile has no more generations left, clean up the profile symlink
+		if g.Profile != "system" && g.Profile != "" {
+			cleanupNamedProfileIfEmpty(g.Profile, outChan)
 		}
 	}
 
@@ -487,6 +647,15 @@ func PurgeGenerationsStream(gens []Generation, outChan chan<- string) error {
 	_ = runCmdStream(nil, outChan, "nix-collect-garbage")
 
 	return nil
+}
+
+func cleanupNamedProfileIfEmpty(profileName string, outChan chan<- string) {
+	profileLink := filepath.Join("/nix/var/nix/profiles/system-profiles", profileName)
+	links, _ := filepath.Glob(filepath.Join("/nix/var/nix/profiles/system-profiles", profileName+"-*-link"))
+	if len(links) == 0 {
+		outChan <- fmt.Sprintf("Removing empty profile pointer: %s...", profileName)
+		_ = os.Remove(profileLink)
+	}
 }
 
 func OptimizeStoreStream(outChan chan<- string) error {

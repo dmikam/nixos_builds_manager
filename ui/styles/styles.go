@@ -32,6 +32,10 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("#EF4444"))
 
+	OrphanBadge = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#F59E0B"))
+
 	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("#374151")).
