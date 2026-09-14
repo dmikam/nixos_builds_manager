@@ -357,6 +357,18 @@ func (m Model) renderBuildModal() string {
 	chkProfile := "[ ] As a new Profile"
 	if m.IsProfile {
 		chkProfile = "[X] As a new Profile"
+	var profileHint string
+	if len(m.KnownProfiles) > 0 {
+		displayProfiles := strings.Join(m.KnownProfiles, ", ")
+		if len(displayProfiles) > 40 {
+			displayProfiles = displayProfiles[:37] + "..."
+		}
+		profileHint = fmt.Sprintf("\n%s\n%s",
+			styles.HeaderInfo.Render("Existing: <default>, "+displayProfiles),
+			styles.HeaderInfo.Render("(Press ↑ / ↓ to cycle existing profiles)"),
+		)
+	} else {
+		profileHint = fmt.Sprintf("\n%s", styles.HeaderInfo.Render("(Leave empty for default system profile)"))
 	}
 	if m.BuildModalOption == 1 {
 		chkProfile = styles.ButtonActive.Render(chkProfile)
@@ -381,6 +393,9 @@ func (m Model) renderBuildModal() string {
 
 	msg := fmt.Sprintf(
 		"CREATE NEW NIXOS BUILD\n\nLabel:\n%s\n\n%s\n%s\n\n%s   %s",
+		"CREATE NEW NIXOS BUILD\n\nProfile:\n%s%s\n\nBuild Label:\n%s\n\n%s\n\n%s   %s",
+		m.ProfileInput.View(),
+		profileHint,
 		m.LabelInput.View(),
 		chkProfile,
 		chkSwitch,

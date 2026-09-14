@@ -506,27 +506,73 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func RebuildSystemStream(label string, isProfile bool, switchBuild bool, outChan chan<- string) error {
+// ListExistingProfiles returns a sorted list of unique named profiles discovered
+// on the system (from /nix/var/nix/profiles/system-profiles/ and from generations).
+// The default "system" profile is excluded as it represents the default profile without -p.
+func ListExistingProfiles(gens []Generation) []string {
+	seen := make(map[string]bool)
+	var profiles []string
+
+	for _, g := range gens {
+		if g.Profile != "" && g.Profile != "system" && !seen[g.Profile] {
+			seen[g.Profile] = true
+			profiles = append(profiles, g.Profile)
+		}
+	}
+
+	namedFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*-link")
+	reNamed := regexp.MustCompile(`^(.+)-(\d+)-link$`)
+	for _, file := range namedFiles {
+		base := filepath.Base(file)
+		matches := reNamed.FindStringSubmatch(base)
+		if len(matches) > 1 {
+			p := matches[1]
+			if p != "" && p != "system" && !seen[p] {
+				seen[p] = true
+				profiles = append(profiles, p)
+			}
+		}
+	}
+
+	sort.Strings(profiles)
+	return profiles
+}
+
+func cleanStaleProfileLocks() {
+	lockFiles, _ := filepath.Glob("/nix/var/nix/profiles/system-profiles/*.lock")
+	for _, f := range lockFiles {
+		_ = os.Remove(f)
+	}
+	rootLocks, _ := filepath.Glob("/nix/var/nix/profiles/*.lock")
+	for _, f := range rootLocks {
+		_ = os.Remove(f)
+	}
+}
+
+func RebuildSystemStream(profile string, label string, switchBuild bool, outChan chan<- string) error {
+	cleanStaleProfileLocks()
+
 	action := "boot"
 	if switchBuild {
 		action = "switch"
 	}
 
+	cleanProfile := SanitizeLabel(profile)
 	cleanLabel := SanitizeLabel(label)
 
 	var args []string
 	var env []string
 
-	if cleanLabel != "" {
-		if isProfile {
-			args = append(args, action, "-p", cleanLabel)
-		} else {
-			args = append(args, action)
-			env = append(os.Environ(), fmt.Sprintf("NIXOS_LABEL=%s", cleanLabel))
-		}
-		outChan <- fmt.Sprintf("Using sanitized build label: %s", cleanLabel)
+	if cleanProfile != "" && cleanProfile != "system" {
+		args = append(args, action, "-p", cleanProfile)
+		outChan <- fmt.Sprintf("Using target profile: %s", cleanProfile)
 	} else {
 		args = append(args, action)
+	}
+
+	if cleanLabel != "" {
+		env = append(os.Environ(), fmt.Sprintf("NIXOS_LABEL=%s", cleanLabel))
+		outChan <- fmt.Sprintf("Using sanitized build label: %s", cleanLabel)
 	}
 
 	return runCmdStream(env, outChan, "nixos-rebuild", args...)

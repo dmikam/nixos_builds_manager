@@ -33,6 +33,14 @@ type Model struct {
 	IsProfile        bool
 	SwitchBuild      bool
 	BuildModalOption int
+	AboutModal          bool
+	BuildModal          bool
+	ProfileInput        textinput.Model
+	LabelInput          textinput.Model
+	KnownProfiles       []string
+	SelectedProfileIdx  int
+	SwitchBuild         bool
+	BuildModalOption    int
 
 	ConfirmModal     bool
 	PurgeModalOption int
@@ -77,6 +85,12 @@ func InitialModel() Model {
 	s.Spinner = spinner.Dot
 	vp := viewport.New(80, 20)
 
+	pi := textinput.New()
+	pi.Placeholder = "Profile name (leave empty for default)..."
+	pi.CharLimit = 64
+	pi.Width = 40
+	pi.ShowSuggestions = true
+
 	ti := textinput.New()
 	ti.Placeholder = "Enter build label..."
 	ti.CharLimit = 64
@@ -98,8 +112,11 @@ func InitialModel() Model {
 		SwitchModal:          false,
 		AnalyzeModal:         false,
 		SwitchModalOption:    0,
+		ProfileInput:         pi,
 		LabelInput:           ti,
 		IsProfile:            false,
+		KnownProfiles:        []string{},
+		SelectedProfileIdx:   0,
 		SwitchBuild:          true,
 		BuildModalOption:     0,
 		PurgeModalOption:     0,

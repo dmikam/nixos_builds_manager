@@ -159,9 +159,16 @@ This package is responsible for discovering NixOS generations, querying store in
 #### 4.2.3 Mutating Operations & Command Streaming
 All mutating operations run through `runCmdStream(...)`:
 - **`RebuildSystemStream(label, isProfile, switchBuild, outChan)`**:
+- **`ListExistingProfiles(gens []Generation) []string`**:
+  - Scans `/nix/var/nix/profiles/system-profiles/*-link` and existing generations to return a deduplicated, sorted list of named profiles.
+- **`RebuildSystemStream(profile, label, switchBuild, outChan)`**:
   - Invokes `nixos-rebuild boot` or `nixos-rebuild switch`.
   - Sanitizes labels using `SanitizeLabel` (replacing non-alphanumeric chars with `_`).
   - Applies `-p <label>` for profiles or sets environment variable `NIXOS_LABEL=<label>`.
+  - Sanitizes profile and label using `SanitizeLabel` (replacing non-alphanumeric chars with `_`).
+  - If a profile is specified (and not `"system"`), applies `-p <profile>`.
+  - If a label is specified, sets environment variable `NIXOS_LABEL=<label>`.
+  - Profile and label can be combined in the same build.
 - **`SwitchToGenerationStream(gen, outChan)`**:
   - Switches profile pointer via `nix-env -p <profilePath> --switch-generation <ID>`.
   - Executes system activation script: `<gen.Target>/bin/switch-to-configuration switch` (activates configuration without rebuilding).
@@ -200,6 +207,7 @@ All mutating operations run through `runCmdStream(...)`:
 - **Modal Dialog Flags & States**:
   - `AboutModal bool`: Application information modal.
   - `BuildModal bool`: Create new build modal. Includes `LabelInput textinput.Model`, `IsProfile bool`, `SwitchBuild bool`, and `BuildModalOption int` (focus state between input, checkboxes, and buttons).
+  - `BuildModal bool`: Create new build modal. Includes `ProfileInput textinput.Model`, `LabelInput textinput.Model`, `KnownProfiles []string`, `SelectedProfileIdx int`, `SwitchBuild bool`, and `BuildModalOption int` (focus state between profile input, label input, switch checkbox, and buttons).
   - `AnalyzeModal bool`: Displays closure size details (`AnalyzeGen`, `AnalyzeResult`).
   - `ConfirmModal bool`: Purge confirmation dialog (`PurgeModalOption int`).
   - `ConfirmOptimizeModal bool`: Store optimization confirmation (`OptimizeModalOption int`).

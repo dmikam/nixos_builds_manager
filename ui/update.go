@@ -257,6 +257,7 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.LabelInput.Blur()
 		}
+		m = m.syncBuildModalFocus()
 		return m, nil
 
 	case "shift+tab":
@@ -266,6 +267,7 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.LabelInput.Blur()
 		}
+		m = m.syncBuildModalFocus()
 		return m, nil
 
 	case "up":
@@ -273,7 +275,26 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.BuildModalOption--
 			if m.BuildModalOption == 0 {
 				m.LabelInput.Focus()
+		if m.BuildModalOption == 0 {
+			choices := append([]string{""}, m.KnownProfiles...)
+			if len(choices) > 1 {
+				m.SelectedProfileIdx = (m.SelectedProfileIdx - 1 + len(choices)) % len(choices)
+				m.ProfileInput.SetValue(choices[m.SelectedProfileIdx])
+				m.ProfileInput.CursorEnd()
 			}
+			return m, nil
+		} else if m.BuildModalOption == 1 {
+			m.BuildModalOption = 0
+			m = m.syncBuildModalFocus()
+			return m, nil
+		} else if m.BuildModalOption == 2 {
+			m.BuildModalOption = 1
+			m = m.syncBuildModalFocus()
+			return m, nil
+		} else if m.BuildModalOption == 3 || m.BuildModalOption == 4 {
+			m.BuildModalOption = 2
+			m = m.syncBuildModalFocus()
+			return m, nil
 		}
 
 	case "down":
@@ -281,7 +302,22 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.BuildModalOption++
 			if m.BuildModalOption != 0 {
 				m.LabelInput.Blur()
+		if m.BuildModalOption == 0 {
+			choices := append([]string{""}, m.KnownProfiles...)
+			if len(choices) > 1 {
+				m.SelectedProfileIdx = (m.SelectedProfileIdx + 1) % len(choices)
+				m.ProfileInput.SetValue(choices[m.SelectedProfileIdx])
+				m.ProfileInput.CursorEnd()
 			}
+			return m, nil
+		} else if m.BuildModalOption == 1 {
+			m.BuildModalOption = 2
+			m = m.syncBuildModalFocus()
+			return m, nil
+		} else if m.BuildModalOption == 2 {
+			m.BuildModalOption = 3
+			m = m.syncBuildModalFocus()
+			return m, nil
 		}
 
 	case "left", "right":
@@ -297,11 +333,19 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.BuildModalOption == 1 {
 			m.IsProfile = !m.IsProfile
 		} else if m.BuildModalOption == 2 {
+		if m.BuildModalOption == 2 {
 			m.SwitchBuild = !m.SwitchBuild
+			return m, nil
 		}
 		return m, nil
 
 	case "enter":
+		if m.BuildModalOption == 0 {
+			// Advance to Label input
+			m.BuildModalOption = 1
+			m = m.syncBuildModalFocus()
+			return m, nil
+		}
 		if m.BuildModalOption == 4 {
 			m.BuildModal = false
 			return m, nil
@@ -309,11 +353,24 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.BuildModal = false
 		m.IsLoading = true
 		m.ShowLog = true
+		rawProfile := m.ProfileInput.Value()
 		rawLabel := m.LabelInput.Value()
+		cleanProfile := nix.SanitizeLabel(rawProfile)
 		cleanLabel := nix.SanitizeLabel(rawLabel)
 		m.LogData = fmt.Sprintf("Starting build (Label: %s)...\n\n", cleanLabel)
+
+		logMsg := "Starting build"
+		if cleanProfile != "" && cleanProfile != "system" {
+			logMsg += fmt.Sprintf(" (Profile: %s)", cleanProfile)
+		}
+		if cleanLabel != "" {
+			logMsg += fmt.Sprintf(" (Label: %s)", cleanLabel)
+		}
+		logMsg += "...\n\n"
+		m.LogData = logMsg
 		m.Viewport.SetContent(m.LogData)
 		return m, runBuildStreamCmd(cleanLabel, m.IsProfile, m.SwitchBuild)
+		return m, runBuildStreamCmd(cleanProfile, cleanLabel, m.SwitchBuild)
 
 	case "esc":
 		m.BuildModal = false
@@ -321,11 +378,28 @@ func (m Model) handleBuildModalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.BuildModalOption == 0 {
+		m.ProfileInput, cmd = m.ProfileInput.Update(msg)
+		return m, cmd
+	} else if m.BuildModalOption == 1 {
 		m.LabelInput, cmd = m.LabelInput.Update(msg)
 		return m, cmd
 	}
 
 	return m, nil
+}
+
+func (m Model) syncBuildModalFocus() Model {
+	if m.BuildModalOption == 0 {
+		m.ProfileInput.Focus()
+		m.LabelInput.Blur()
+	} else if m.BuildModalOption == 1 {
+		m.ProfileInput.Blur()
+		m.LabelInput.Focus()
+	} else {
+		m.ProfileInput.Blur()
+		m.LabelInput.Blur()
+	}
+	return m
 }
 
 func (m Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -425,8 +499,14 @@ func (m Model) executeButtonAction() (tea.Model, tea.Cmd) {
 		m.BuildModalOption = 0
 		m.IsProfile = false
 		m.SwitchBuild = true
+		m.KnownProfiles = nix.ListExistingProfiles(m.Generations)
+		m.SelectedProfileIdx = 0
+		m.ProfileInput.Reset()
+		m.ProfileInput.SetSuggestions(m.KnownProfiles)
+		m.ProfileInput.Focus()
 		m.LabelInput.Reset()
 		m.LabelInput.Focus()
+		m.LabelInput.Blur()
 		return m, textinput.Blink
 	case 2: // Storage (F4 / S)
 		if len(m.Generations) > m.Cursor {
@@ -491,10 +571,12 @@ func waitForStreamCmd() tea.Cmd {
 }
 
 func runBuildStreamCmd(label string, isProfile bool, switchBuild bool) tea.Cmd {
+func runBuildStreamCmd(profile string, label string, switchBuild bool) tea.Cmd {
 	globalStreamChan = make(chan string, 100)
 	return tea.Batch(
 		func() tea.Msg {
 			err := nix.RebuildSystemStream(label, isProfile, switchBuild, globalStreamChan)
+			err := nix.RebuildSystemStream(profile, label, switchBuild, globalStreamChan)
 			close(globalStreamChan)
 			return OperationCompletedMsg{Err: err}
 		},
